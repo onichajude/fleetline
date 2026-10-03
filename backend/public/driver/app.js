@@ -1,10 +1,11 @@
 import { createClient, esc, hm, ago, haversine, tileLayer } from "/shared/client.js";
+import { signupHtml, checkHtml, statsHtml } from "./extras.js";
 
 const client = createClient("fleetline.driver");
 const root = document.getElementById("root");
 const QKEY = "fleetline.driver.queue";
 
-const S = { state: null, picked: null, armed: null, skipReason: "", note: "", loading: false };
+const S = { state: null, picked: null, armed: null, skipReason: "", note: "", loading: false, view: "today", profile: null, check: { items: {}, notes: "", later: false } };
 const G = { watchId: null, status: "off", last: null, lastRecorded: null, lastSentAt: null, error: "", flushing: false, wake: null, gapWarn: false };
 let queue = [];
 try { queue = JSON.parse(localStorage.getItem(QKEY)) || []; } catch { queue = []; }
@@ -22,13 +23,34 @@ function loginScreen(msg = "") {
     <label>Password<input id="lp" type="password" autocomplete="current-password" required></label>
     <div class="err" id="le">${esc(msg)}</div>
     <button class="btn primary block" type="submit">Sign in</button>
+    <button class="btn block" type="button" id="toSignup">New driver? Request an account</button>
     ${insecureNote()}
   </form>`;
+  document.getElementById("toSignup").addEventListener("click", signupScreen);
   document.getElementById("lf").addEventListener("submit", async (e) => {
     e.preventDefault();
     try { await client.login(document.getElementById("lu").value.trim(), document.getElementById("lp").value, "driver"); await start(); }
     catch (err) { document.getElementById("le").textContent = err.message; }
   });
+}
+function signupScreen() {
+  root.innerHTML = signupHtml();
+  const v = (id) => document.getElementById(id).value;
+  document.getElementById("su-back").addEventListener("click", () => loginScreen());
+  document.getElementById("sf").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const err = document.getElementById("su-err");
+    err.textContent = "";
+    try {
+      const r = await client.post("/api/auth/register", { name: v("su-name").trim(), phone: v("su-phone").trim(), license_no: v("su-lic").trim(),
+        vehicle_type: v("su-type"), username: v("su-user").trim().toLowerCase(), password: v("su-pass") });
+      root.innerHTML = `<div class="login card" style="margin-top:8vh;padding:20px"><h1>Request sent</h1><p>${esc(r.message)}</p>
+        <p class="muted">Your username is <b>${esc(v("su-user").trim().toLowerCase())}</b>. Sign in once your dispatcher approves you.</p>
+        <button class="btn primary block" id="su-done">Back to sign in</button></div>`;
+      document.getElementById("su-done").addEventListener("click", () => loginScreen());
+    } catch (ex) { err.textContent = ex.message; }
+  });
+  document.getElementById("su-name").focus();
 }
 const logo = () => `<svg width="28" height="28" viewBox="0 0 30 30" aria-hidden="true"><rect width="30" height="30" rx="7" fill="var(--fg)"/><path d="M7 20 L13 10 L17 16 L23 8" stroke="var(--accent)" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 const insecureNote = () => isSecureContext ? "" :
@@ -37,19 +59,24 @@ const insecureNote = () => isSecureContext ? "" :
 function shell() {
   root.innerHTML = `
     <header class="top"><div class="brand">${logo()} Fleetline</div><span class="muted" id="who"></span></header>
+    <div class="seg2 views" role="tablist"><button role="tab" data-act="view" data-v="today" aria-pressed="true">Today</button><button role="tab" data-act="view" data-v="stats" aria-pressed="false">My stats</button></div>
+    <section id="stats" class="statsview" hidden></section>
     <div id="gps"></div>
+    <section id="check"></section>
     <div id="warn"></div>
     <section id="body"></section>
     <div id="minimap" hidden></div>
     <section id="list"></section>
-    <div class="foot" id="foot"></div>`;
+    <div class="foot" id="foot"></div>
+    <section id="account"></section>`;
   root.addEventListener("click", onClick);
-  root.addEventListener("input", (e) => { if (e.target.id === "note") S.note = e.target.value; });
+  root.addEventListener("input", (e) => { if (e.target.id === "note") S.note = e.target.value; if (e.target.id === "chknotes") S.check.notes = e.target.value; });
   root.addEventListener("change", (e) => { if (e.target.id === "reason") S.skipReason = e.target.value; });
 }
 
 async function start() {
   shell();
+  renderAccount(false);
   await loadState();
   connectSocket();
   setInterval(loadState, 60e3);
@@ -70,8 +97,9 @@ async function loadState() {
     render();
   } catch (e) { if (S.state) toast(e.message, true); else loginScreen(e.message); }
 }
+let socket;
 function connectSocket() {
-  const socket = io({ auth: { token: client.session.token } });
+  socket = io({ auth: { token: client.session.token } });
   socket.on("route", (r) => {
     const prev = S.state?.route;
     if (!prev || prev.id !== r.id) { toast(r.status === "cancelled" ? `Route ${r.code} was cancelled` : `New route: ${r.code} · ${r.stops.length} stops`); navigator.vibrate?.([200, 100, 200]); }
@@ -154,8 +182,23 @@ const navUrl = (s) => /iPhone|iPad|iPod/.test(navigator.userAgent)
   ? `https://maps.apple.com/?daddr=${s.lat},${s.lng}&dirflg=d`
   : `https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lng}&travelmode=driving`;
 
+function renderCheck() {
+  const el = document.getElementById("check");
+  if (!el || el.contains(document.activeElement)) return; // don't interrupt typing
+  const st = S.state;
+  const html = st?.shift && !st.inspection_done && !S.check.later && S.view === "today" ? checkHtml(st, S.check) : "";
+  if (el.innerHTML !== html) el.innerHTML = html;
+}
+async function loadProfile() {
+  try { S.profile = await client.get("/api/driver/profile"); } catch (e) { toast(e.message, true); }
+  if (S.view === "stats") document.getElementById("stats").innerHTML = statsHtml(S.profile);
+}
 function render() {
   const st = S.state;
+  root.dataset.view = S.view;
+  for (const b of document.querySelectorAll(".views button")) b.setAttribute("aria-pressed", String(b.dataset.v === S.view));
+  document.getElementById("stats").hidden = S.view !== "stats";
+  renderCheck();
   document.getElementById("who").textContent = st.user.name;
   updateGps();
   const body = document.getElementById("body"), list = document.getElementById("list"), foot = document.getElementById("foot"), mm = document.getElementById("minimap");
@@ -214,12 +257,43 @@ function render() {
   drawMini();
 }
 
+/* ---------- account ---------- */
+function renderAccount(open) {
+  const el = document.getElementById("account");
+  if (!el) return;
+  el.innerHTML = !open ? `<button class="btn sm" data-act="pwopen" style="width:100%">Change password</button>`
+    : `<form class="card" id="pwform" style="display:flex;flex-direction:column;gap:10px">
+        <h2 style="margin:0">Change password</h2>
+        <input class="field" type="password" id="pwcur" placeholder="Current password" autocomplete="current-password" aria-label="Current password" required>
+        <input class="field" type="password" id="pwnew" placeholder="New password (8+ characters)" autocomplete="new-password" aria-label="New password" minlength="8" required>
+        <input class="field" type="password" id="pwrep" placeholder="Repeat new password" autocomplete="new-password" aria-label="Repeat new password" required>
+        <div class="err" id="pwerr"></div>
+        <div class="grid2"><button class="btn" type="button" data-act="pwclose">Cancel</button><button class="btn primary" type="submit">Save</button></div>
+      </form>`;
+  const form = document.getElementById("pwform");
+  if (!form) return;
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const err = document.getElementById("pwerr"), next = document.getElementById("pwnew").value;
+    if (next !== document.getElementById("pwrep").value) { err.textContent = "The two new passwords don't match."; return; }
+    try {
+      const r = await client.post("/api/me/password", { current_password: document.getElementById("pwcur").value, new_password: next });
+      client.setToken(r.token);
+      if (socket) socket.auth.token = r.token;
+      renderAccount(false);
+      toast("Password changed. Other devices have been signed out.");
+    } catch (ex) { err.textContent = ex.message; }
+  });
+  document.getElementById("pwcur").focus();
+}
+
 /* ---------- mini map ---------- */
 let mini, meMarker, routeLayer, lastFitKey = "";
 function drawMini() {
   if (!window.L) return;
   if (!mini) {
     mini = L.map("minimap", { zoomControl: false, attributionControl: true });
+    new ResizeObserver(() => mini.invalidateSize()).observe(document.getElementById("minimap"));
     fetch("/api/config").then((r) => r.json()).then((c) => tileLayer(c.tileUrl, { attribution: c.tileAttribution, maxZoom: 19 }).addTo(mini));
     routeLayer = L.layerGroup().addTo(mini);
     mini.setView([G.last?.lat ?? 0, G.last?.lng ?? 0], G.last ? 15 : 2);
@@ -253,10 +327,20 @@ async function onClick(e) {
   if (!b) return;
   const act = b.dataset.act, id = Number(b.dataset.id);
   if (act === "pick") { S.picked = id; return render(); }
+  if (act === "view") {
+    S.view = b.dataset.v; render();
+    if (S.view === "stats") { document.getElementById("stats").innerHTML = statsHtml(S.profile); loadProfile(); }
+    window.scrollTo(0, 0);
+    return;
+  }
+  if (act === "chk") { S.check.items[b.dataset.k] = b.dataset.v; document.getElementById("check").innerHTML = ""; return renderCheck(); }
+  if (act === "chklater") { S.check.later = true; return renderCheck(); }
   if (act === "armskip") { S.armed = "skip" + id; S.skipReason = ""; return render(); }
   if (act === "unarm") { S.armed = null; return render(); }
   if (act === "dismissgap") { G.gapWarn = false; return updateGps(); }
   if (act === "logout") return client.logout();
+  if (act === "pwopen") return renderAccount(true);
+  if (act === "pwclose") return renderAccount(false);
   if (act === "endshift" && S.armed !== "end") { S.armed = "end"; render(); setTimeout(() => { if (S.armed === "end") { S.armed = null; render(); } }, 4000); return; }
   if (S.loading) return;
   S.loading = true; b.disabled = true;
@@ -265,6 +349,11 @@ async function onClick(e) {
       await askLocation();
       S.state = await client.post("/api/driver/shift/start", { vehicle_id: S.picked });
       startGps(); toast(`Shift started in ${S.state.vehicle.code}. Keep this app open while driving.`);
+    } else if (act === "chksubmit") {
+      S.state = await client.post("/api/driver/inspection", { items: S.check.items, notes: S.check.notes });
+      const problems = Object.values(S.check.items).filter((x) => x === "issue").length;
+      S.check = { items: {}, notes: "", later: false };
+      toast(problems ? "Check saved. Dispatch has been told about the problem." : "Check saved. All OK.");
     } else if (act === "startroute") { S.state = await client.post(`/api/driver/route/${id}/start`); toast("Route started. Drive safe."); }
     else if (act === "arrive") { S.state = await client.post(`/api/driver/stops/${id}/arrive`); }
     else if (act === "complete") { S.state = await client.post(`/api/driver/stops/${id}/complete`, { note: S.note }); S.note = ""; toast("Delivery saved"); }

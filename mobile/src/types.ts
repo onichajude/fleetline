@@ -39,6 +39,36 @@ export type DriverState = {
   route: Route | null;
   finished: Route | null;
   config: { geofenceM: number };
+  inspection_done: boolean;
+  /** [key, label] pairs for the pre-trip check. */
+  inspection_items: [string, string][];
+};
+
+export type PeriodStats = {
+  trips: number; delivered: number; skipped: number; arrived: number; ontime: number;
+  onTimePct: number | null; km: number; drivingHours: number; shiftHours: number;
+};
+export type VehicleCondition = {
+  id: number; code: string; type: string; plate: string | null;
+  status: "good" | "service_soon" | "attention" | "out_of_service"; reasons: string[];
+  odometer_km: number; next_service_km: number; service_interval_km: number; last_service_at: number | null;
+  last_inspection: { created_at: number; issues: string[]; issues_open: boolean; notes: string | null } | null;
+};
+export type TripSummary = {
+  id: number; code: string; name: string; status: string; completed_at: number | null; vehicle_code: string | null;
+  total: number; delivered: number; onTimePct: number | null;
+};
+export type DriverProfile = {
+  driver: { id: number; name: string; username: string };
+  weekStart: string; weekEnd: string;
+  week: PeriodStats;
+  average: (Omit<PeriodStats, "skipped" | "arrived" | "ontime"> & { weeks: number }) | null;
+  rank: { position: number; of: number; behindBy: number } | null;
+  daily: { date: string; delivered: number; late: number; km: number }[];
+  current: (TripSummary & { stops: { seq: number; status: StopStatus; planned_at: number | null; name: string }[] }) | null;
+  recentTrips: TripSummary[];
+  totals: { trips: number; delivered: number };
+  vehicle: VehicleCondition | null;
 };
 
 export type GpsPoint = { lat: number; lng: number; accuracy: number | null; speed: number | null; heading: number | null; t: number };

@@ -156,7 +156,8 @@ export function startRoute(routeId, by = "driver") {
   const r = one("SELECT r.*, d.lat dlat, d.lng dlng FROM routes r LEFT JOIN depots d ON d.id = r.depot_id WHERE r.id = ?", routeId);
   if (!r || r.status !== "dispatched") return;
   const now = Date.now();
-  run("UPDATE routes SET status = 'active', started_at = ? WHERE id = ?", now, routeId);
+  const shift = r.vehicle_id ? openShift(r.vehicle_id) : null;
+  run("UPDATE routes SET status = 'active', started_at = ?, driver_id = COALESCE(driver_id, ?) WHERE id = ?", now, shift?.driver_id ?? null, routeId);
   const l = live.get(r.vehicle_id);
   const from = l ? { lat: l.lat, lng: l.lng, fromVehicle: haversine(l, { lat: r.dlat ?? l.lat, lng: r.dlng ?? l.lng }) > 300 } : { lat: r.dlat, lng: r.dlng };
   planStops(r, now, from);
@@ -238,7 +239,7 @@ export function ingestPositions(driver, shift, points) {
 
   let l = live.get(v.id);
   const insert = "INSERT INTO positions (vehicle_id, shift_id, driver_id, lat, lng, speed_kmh, heading, accuracy_m, recorded_at, received_at) VALUES (?,?,?,?,?,?,?,?,?,?)";
-  let accepted = 0;
+  let accepted = 0, odoMeters = 0;
   tx(() => {
     for (const p of clean) {
       if (p.accuracy != null && p.accuracy > 500) continue;
@@ -247,6 +248,8 @@ export function ingestPositions(driver, shift, points) {
         const d = haversine(l, p), dt = (p.t - l.t) / 1000;
         if (p.speed == null && dt > 0) p.speed = (d / dt) * 3.6;
         if ((p.heading == null || Number.isNaN(p.heading)) && d > 8) p.heading = bearing(l, p);
+        // Odometer: count plausible movement only (good accuracy, under ~250 km/h).
+        if ((p.accuracy ?? 0) <= CFG.maxAccuracyM && dt > 0 && d / dt < 70) odoMeters += d;
       }
       run(insert, v.id, shift.id, driver.id, p.lat, p.lng, p.speed, p.heading, p.accuracy, p.t, now);
       accepted++;
@@ -256,6 +259,7 @@ export function ingestPositions(driver, shift, points) {
         checkPoint(v, l, p);
       }
     }
+    if (odoMeters > 0) run("UPDATE vehicles SET odometer_km = odometer_km + ? WHERE id = ?", odoMeters / 1000, v.id);
   });
   pushVehicle(v.id);
   return accepted;

@@ -7,7 +7,7 @@ import type { Session, User } from "../types";
 import { Button, Field } from "../ui";
 import { useTheme } from "../theme";
 
-export function LoginScreen({ onSignedIn }: { onSignedIn: (s: Session) => void }) {
+export function LoginScreen({ onSignedIn, onSignup }: { onSignedIn: (s: Session) => void; onSignup: (server: string) => void }) {
   const c = useTheme();
   const defaultServer = (Constants.expoConfig?.extra?.defaultServer as string | undefined) || "";
   const [server, setServer] = useState(defaultServer);
@@ -46,6 +46,7 @@ export function LoginScreen({ onSignedIn }: { onSignedIn: (s: Session) => void }
         <Field label="Password" value={password} onChangeText={setPassword} secureTextEntry textContentType="password" autoComplete="password" onSubmitEditing={submit} returnKeyType="go" />
         {error ? <Text style={{ color: c.crit, fontSize: 15 }} accessibilityLiveRegion="polite">{error}</Text> : null}
         <Button title="Sign in" kind="primary" onPress={submit} busy={busy} disabled={!username || !password} />
+        <Button title="New driver? Request an account" onPress={() => onSignup(server)} />
         <View style={{ marginTop: 8 }}>
           <Text style={{ color: c.muted, fontSize: 13, lineHeight: 19 }}>
             Your dispatcher gives you the server address and your username. Location is shared only while you are on shift.

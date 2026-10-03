@@ -35,6 +35,9 @@ flowchart LR
 - **Automation:** stops are marked arrived when the vehicle enters a 90 m geofence and completed when it drives away.
 - **Alerts:** speeding, late arrivals, routes running behind, skipped stops, phones that stop reporting.
 - **Analytics:** on-time rate, deliveries by hour, distance and driving time per vehicle, route performance, by day.
+- **Driver sign-up:** drivers request an account from the app; an admin approves them and assigns a truck or van.
+- **Performance:** each driver sees their own week vs. 4-week average, weekly rank, 14-day history, route and vehicle condition; admins see the same for every driver and vehicle in the Team tab.
+- **Vehicle condition:** pre-trip checks, GPS odometer, service countdown and service records.
 
 ## Quick start
 

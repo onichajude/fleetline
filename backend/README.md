@@ -86,6 +86,7 @@ server/
   index.js     HTTP server, static files, Socket.IO
   api.js       REST endpoints (auth, fleet, routes, places, drivers, driver app, analytics)
   fleet.js     Live vehicle state, GPS intake, geofencing, alerts, route lifecycle, analytics
+  stats.js     Driver and vehicle performance, weekly rankings, vehicle condition
   db.js        SQLite schema (node:sqlite)
   auth.js      Password hashing (scrypt), JWT sessions, login throttling
   geo.js       Distance, stop-order optimisation, OSRM road routing
@@ -111,6 +112,15 @@ All endpoints take and return JSON. Send `Authorization: Bearer <token>` from `P
 | POST | `/api/routes/:id/dispatch` · `/optimize` · `/cancel` | staff | Route lifecycle |
 | GET/POST/PATCH/DELETE | `/api/places` | staff | Delivery locations |
 | GET/POST/PATCH | `/api/drivers`, `/api/vehicles` | staff (create: admin) | Fleet setup |
+| POST | `/api/me/password` | any | `{current_password, new_password}` → `{token}`; signs out other sessions |
+| GET | `/api/users`, POST `/api/users/:id/password` | admin | List accounts; reset anyone's password (`{new_password}`) |
+| POST | `/api/auth/register` | public | Driver sign-up; pending until approved |
+| POST | `/api/users/:id/approve` · `/decline` | admin | Approve (optional `{vehicle_id}`) or decline a sign-up |
+| GET | `/api/team?date=` | staff | Weekly driver leaderboard and every vehicle's condition |
+| GET | `/api/drivers/:id/profile`, `/api/vehicles/:id/profile` | staff | Performance pages (week vs average, daily, trips, condition) |
+| POST | `/api/vehicles/:id/service` | staff | Record a service (`{note}`) at the current odometer |
+| GET | `/api/driver/profile` | driver | The signed-in driver's own performance page |
+| POST | `/api/driver/inspection` | driver | Pre-trip check `{items: {tires: "ok"\|"issue", ...}, notes}` |
 | GET | `/api/alerts`, POST `/api/alerts/:id/ack` | staff | Alert feed |
 | GET | `/api/analytics?date=YYYY-MM-DD` | staff | Distance, driving time, on-time rate, deliveries by hour, routes |
 | GET | `/api/driver/state` | driver | Shift, vehicle and current route |

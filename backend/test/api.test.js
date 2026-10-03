@@ -120,3 +120,96 @@ test("full delivery cycle with GPS geofencing", async () => {
   await call("POST", "/api/driver/shift/end", driver);
   assert.equal((await call("POST", "/api/driver/positions", driver, { points: [{ lat: a.lat, lng: a.lng, t: Date.now() }] })).status, 409);
 });
+
+test("password changes sign out other sessions; admins can reset passwords", async () => {
+  // A driver changes their own password.
+  const oldToken = await login("kasia", "driver123", "driver");
+  const otherDevice = await login("kasia", "driver123", "driver");
+  assert.equal((await call("POST", "/api/me/password", oldToken, { current_password: "wrong-pass", new_password: "new-pass-123" })).status, 400);
+  assert.equal((await call("POST", "/api/me/password", oldToken, { current_password: "driver123", new_password: "short" })).status, 400);
+  assert.equal((await call("POST", "/api/me/password", oldToken, { current_password: "driver123", new_password: "driver123" })).status, 400);
+  const changed = await call("POST", "/api/me/password", oldToken, { current_password: "driver123", new_password: "new-pass-123" });
+  assert.equal(changed.status, 200);
+  assert.ok(changed.data.token);
+
+  // Old sessions stop working; the returned token and the new password work.
+  assert.equal((await call("GET", "/api/driver/state", otherDevice)).status, 401);
+  assert.equal((await call("GET", "/api/driver/state", oldToken)).status, 401);
+  assert.equal((await call("GET", "/api/driver/state", changed.data.token)).status, 200);
+  assert.equal((await call("POST", "/api/auth/login", null, { username: "kasia", password: "driver123" })).status, 401);
+  const fresh = await login("kasia", "new-pass-123", "driver");
+  assert.ok(fresh);
+
+  // An admin resets it; the driver's sessions end. Dispatchers can't reset passwords.
+  const admin = await login("admin", "dispatch123", "dispatch");
+  const dispatcher = await login("dispatch", "dispatch123", "dispatch");
+  const users = (await call("GET", "/api/users", admin)).data;
+  const kasia = users.find((u) => u.username === "kasia");
+  assert.equal((await call("POST", `/api/users/${kasia.id}/password`, dispatcher, { new_password: "reset-pass-1" })).status, 403);
+  assert.equal((await call("POST", `/api/users/${kasia.id}/password`, admin, { new_password: "reset-pass-1" })).status, 200);
+  assert.equal((await call("GET", "/api/driver/state", fresh)).status, 401);
+  assert.ok(await login("kasia", "reset-pass-1", "driver"));
+});
+
+test("driver sign-up needs admin approval and gets a vehicle", async () => {
+  const signup = { name: "Ola Bello", phone: "+1 555 0199", username: "ola", password: "ola-pass-2026", license_no: "D1234567", vehicle_type: "van" };
+  assert.equal((await call("POST", "/api/auth/register", null, { ...signup, password: "short" })).status, 400);
+  assert.equal((await call("POST", "/api/auth/register", null, { ...signup, username: "tom" })).status, 400);
+  assert.equal((await call("POST", "/api/auth/register", null, signup)).status, 201);
+  const pending = await call("POST", "/api/auth/login", null, { username: "ola", password: "ola-pass-2026", app: "driver" });
+  assert.equal(pending.status, 403);
+  assert.match(pending.data.error, /waiting for approval/);
+
+  const admin = await login("admin", "dispatch123", "dispatch");
+  const users = (await call("GET", "/api/users", admin)).data;
+  const ola = users.find((u) => u.username === "ola");
+  assert.equal(ola.approval, "pending");
+  assert.ok((await call("GET", "/api/alerts", admin)).data.some((a) => a.kind === "signup"));
+  const van = (await call("GET", "/api/fleet", admin)).data.find((v) => v.code === "VAN-203");
+  assert.equal((await call("POST", `/api/users/${ola.id}/approve`, admin, { vehicle_id: van.id })).status, 200);
+
+  const token = await login("ola", "ola-pass-2026", "driver");
+  const st = (await call("GET", "/api/driver/state", token)).data;
+  assert.ok(st.vehicles.find((v) => v.code === "VAN-203" && v.mine));
+});
+
+test("pre-trip checks, driver profile, team leaderboard and vehicle service", async () => {
+  const admin = await login("admin", "dispatch123", "dispatch");
+  const driver = await login("luis", "driver123", "driver");
+  const truck = (await call("GET", "/api/fleet", admin)).data.find((v) => v.code === "TRK-102");
+  let st = (await call("POST", "/api/driver/shift/start", driver, { vehicle_id: truck.id })).data;
+  assert.equal(st.inspection_done, false);
+
+  const items = Object.fromEntries(st.inspection_items.map(([k]) => [k, "ok"]));
+  assert.equal((await call("POST", "/api/driver/inspection", driver, { items: { ...items, lights: "issue" } })).status, 400); // problem needs a note
+  st = (await call("POST", "/api/driver/inspection", driver, { items: { ...items, lights: "issue" }, notes: "Left indicator out" })).data;
+  assert.equal(st.inspection_done, true);
+
+  const now = Date.now();
+  await call("POST", "/api/driver/positions", driver, { points: [
+    { lat: 29.70, lng: -95.40, speed: 40, accuracy: 10, t: now - 60e3 },
+    { lat: 29.71, lng: -95.40, speed: 40, accuracy: 10, t: now - 30e3 },
+  ] });
+
+  const me = (await call("GET", "/api/driver/profile", driver)).data;
+  assert.equal(me.driver.username, "luis");
+  assert.ok(me.week && me.daily.length === 14);
+  assert.ok(me.rank && me.rank.position >= 1 && me.rank.of >= 1);
+  assert.equal(me.vehicle.code, "TRK-102");
+  assert.equal(me.vehicle.status, "attention");
+  assert.ok(me.vehicle.reasons.some((r) => r.includes("Lights")));
+
+  const team = (await call("GET", "/api/team", admin)).data;
+  assert.ok(team.drivers.find((d) => d.username === "luis"));
+  assert.equal(team.vehicles.length >= 8, true);
+  assert.equal((await call("GET", `/api/drivers/${me.driver.id}/profile`, admin)).data.driver.username, "luis");
+  assert.equal((await call("GET", `/api/drivers/${me.driver.id}/profile`, driver)).status, 403);
+
+  const odoBefore = (await call("GET", `/api/vehicles/${truck.id}/profile`, admin)).data.vehicle.odometer_km;
+  const serviced = (await call("POST", `/api/vehicles/${truck.id}/service`, admin, { note: "Indicator bulb replaced" })).data;
+  assert.equal(serviced.vehicle.status, "good");
+  assert.equal(serviced.vehicle.next_service_km, serviced.vehicle.service_interval_km);
+  assert.ok(serviced.vehicle.odometer_km >= odoBefore);
+  assert.equal(serviced.services[0].note, "Indicator bulb replaced");
+  await call("POST", "/api/driver/shift/end", driver);
+});

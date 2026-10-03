@@ -94,10 +94,70 @@ JWT_SECRET            login signing key; if empty, one is created in backend/dat
 7. BEFORE GOING LIVE
 --------------------
 
-- Change all passwords above. There is no password-change screen yet: set
-  SEED_STAFF_PASSWORD and SEED_DRIVER_PASSWORD in backend/.env, then run
-  "npm run seed -- --reset" (this wipes all data), or add a password screen first.
+- Change all passwords above (see section 8).
 - Host the backend online with HTTPS and permanent storage (e.g. Railway, Render).
 - Use a map provider and routing service with your own account/API key.
 - Set your own app ID in mobile/app.config.ts before publishing the phone app.
 - Tell drivers their location is tracked only while on shift.
+
+
+8. CHANGING PASSWORDS
+---------------------
+
+Your own password:
+  Dispatch console  -> Setup tab -> "Your account"
+  Driver web app    -> "Change password" at the bottom of the screen
+  Native phone app  -> "Change password" at the bottom of the screen
+  You need your current password. New passwords need at least 8 characters.
+
+Someone else's password (admins only, e.g. a driver forgot theirs):
+  Dispatch console -> Setup tab -> Drivers or Staff list -> "Reset password"
+
+Changing or resetting a password signs that person out on every other device.
+A driver who is reset while on shift stops sending GPS until they sign in again.
+
+
+9. NEW DRIVERS (SIGN-UP AND APPROVAL)
+-------------------------------------
+
+Drivers can sign themselves up:
+  Driver app / phone app -> "New driver? Request an account"
+  They enter name, phone, licence number (optional), truck or van, username, password.
+  They can't sign in until an admin approves them.
+
+To approve (admins only):
+  Dispatch console -> Team tab (a red number shows waiting sign-ups)
+  -> pick the truck or van to assign -> Approve   (or Decline)
+
+Admins can also add a driver directly: Setup tab -> Drivers -> Add driver
+(with an optional licence number and vehicle).
+
+
+10. DRIVER PERFORMANCE AND VEHICLE CONDITION
+--------------------------------------------
+
+Drivers see their own page: driver app -> "My stats"
+  - this week vs their own 4-week average: trips, deliveries, on-time %,
+    distance, hours on shift, driving hours
+  - their rank among drivers who worked this week (by deliveries, then
+    on-time rate, then distance)
+  - deliveries per day for the last 14 days (on time vs late)
+  - their current/expected route
+  - their vehicle's condition: odometer, next service, last pre-trip check
+  - recent trips
+
+Admins see the same for every driver: console -> Team tab -> click a driver.
+Vehicle pages: Team tab -> click a vehicle (or Vehicle tab -> "Condition & performance").
+
+Vehicle condition is worked out from:
+  - pre-trip checks drivers do at the start of each shift (tyres, brakes, lights,
+    fluids, body, cargo area). A "Problem" alerts dispatch.
+  - the odometer (grows with GPS distance) and the service interval
+  - "Record service" on the vehicle page, which restarts the service countdown and
+    clears problems reported before it.
+Statuses: Good, Service soon (under 1,000 km), Needs attention (problem reported
+or service overdue), Out of service (marked in maintenance).
+
+Demo data includes 4 weeks of history so averages and rankings show real numbers.
+To get it on your computer: npm run seed -- --reset   (this wipes current data)
+

@@ -1,4 +1,5 @@
 import { createClient, esc, hm, ago, haversine, localDate, tileLayer } from "/shared/client.js";
+import { teamPanel } from "./team.js";
 
 const client = createClient("fleetline.dispatch");
 const $ = (s) => document.querySelector(s);
@@ -20,7 +21,7 @@ const FILTERS = [
 const S = {
   me: null, config: null, fleet: new Map(), routes: new Map(), places: [], depots: [], drivers: [], alerts: [], analytics: null,
   anDate: localDate(), sel: { vid: null, rid: null }, tab: "vehicle", filter: "all", q: "", armed: null,
-  builder: { active: false, stops: [], name: "", vehicle: "", depot: "" }, placeDraft: null, forms: {}, track: [], connected: false,
+  builder: { active: false, stops: [], name: "", vehicle: "", depot: "" }, placeDraft: null, forms: {}, track: [], connected: false, users: [], resetFor: null, team: null, teamDate: localDate(), profile: null,
 };
 
 /* ---------- boot ---------- */
@@ -47,6 +48,7 @@ async function boot() {
     client.get("/api/depots"), client.get("/api/alerts"), client.get("/api/drivers"),
   ]);
   Object.assign(S, { me, config, places, depots, alerts, drivers });
+  if (me.role === "admin") S.users = await client.get("/api/users");
   fleet.forEach((v) => S.fleet.set(v.id, v));
   routes.forEach((r) => S.routes.set(r.id, r));
   $("#login").hidden = true; $("#app").hidden = false;
@@ -56,7 +58,7 @@ async function boot() {
   connectSocket();
   setInterval(tickClock, 1000); tickClock();
   setInterval(refreshFleet, 20e3);
-  setInterval(() => { if (S.tab === "analytics") loadAnalytics(); }, 30e3);
+  setInterval(() => { if (S.tab === "analytics") loadAnalytics(); if (S.tab === "team" && !S.profile) loadTeam(); }, 30e3);
   const first = [...S.fleet.values()].find((v) => v.position && v.status !== "off") || [...S.fleet.values()][0];
   if (first) selectVehicle(first.id, false);
   render(true);
@@ -71,8 +73,9 @@ function tickClock() {
 }
 
 /* ---------- socket ---------- */
+let socket;
 function connectSocket() {
-  const socket = io({ auth: { token: client.session.token } });
+  socket = io({ auth: { token: client.session.token } });
   const setLive = (on) => { S.connected = on; $("#live").classList.toggle("on", on); $("#live span").textContent = on ? "Live" : "Reconnecting"; };
   socket.on("connect", () => { setLive(true); refreshFleet(); });
   socket.on("disconnect", () => setLive(false));
@@ -96,6 +99,7 @@ function connectSocket() {
     S.alerts.unshift(a);
     if (a.severity === "crit") toast(`${a.vehicle_code || ""} ${a.message}`.trim(), true);
     if (a.kind === "route_done" && S.tab === "analytics") loadAnalytics();
+    if (a.kind === "signup" && S.me.role === "admin") client.get("/api/users").then((u) => { S.users = u; render(true); }).catch(() => {});
     scheduleRender();
   });
 }
@@ -105,6 +109,17 @@ let map, vehLayer, placeLayer, routeLayer, trackLine, draftPin;
 const markers = new Map(), placeMarkers = new Map();
 function initMap() {
   map = L.map("map", { zoomControl: true, attributionControl: true });
+  // Re-measure when the map's box changes (window resize, layout switch, page shown after loading hidden).
+  // If the page loaded while hidden, the box had no size yet, so frame the city on the first real size.
+  let framed = false;
+  const frameCity = () => {
+    const el = document.getElementById("map");
+    if (!el.clientWidth || !el.clientHeight) return;
+    const pts = [...S.depots, ...S.places].map((p) => [p.lat, p.lng]);
+    if (pts.length) map.fitBounds(pts, { padding: [30, 30] }); else map.setView([20, 0], 2);
+    framed = true;
+  };
+  new ResizeObserver(() => { map.invalidateSize(); if (!framed) frameCity(); }).observe(document.getElementById("map"));
   tileLayer(S.config.tileUrl, { attribution: S.config.tileAttribution, maxZoom: 19 }).addTo(map);
   placeLayer = L.layerGroup().addTo(map);
   routeLayer = L.layerGroup().addTo(map);
@@ -116,8 +131,8 @@ function initMap() {
   }
   drawPlaces();
   S.fleet.forEach(upsertMarker);
-  const pts = [...S.depots, ...S.places].map((p) => [p.lat, p.lng]);
-  if (pts.length) map.fitBounds(pts, { padding: [30, 30] }); else map.setView([20, 0], 2);
+  map.setView([20, 0], 2); // placeholder until the box has a size
+  frameCity();
   map.on("click", (e) => {
     if (!S.placeDraft) return;
     S.placeDraft = { lat: +e.latlng.lat.toFixed(6), lng: +e.latlng.lng.toFixed(6) };
@@ -230,6 +245,22 @@ function setTab(t) {
   S.tab = t;
   for (const b of document.querySelectorAll("#tabs button")) b.setAttribute("aria-selected", String(b.dataset.tab === t));
   if (t === "analytics") loadAnalytics();
+  if (t === "team" && !S.profile) loadTeam();
+}
+async function loadTeam() {
+  try {
+    const [team, users] = await Promise.all([client.get(`/api/team?date=${S.teamDate}`), S.me.role === "admin" ? client.get("/api/users") : Promise.resolve(S.users)]);
+    S.team = team; S.users = users; render(true);
+  } catch (e) { toast(e.message, true); }
+}
+/** Opens a driver or vehicle performance page in the Team tab. */
+async function openProfile(type, id) {
+  S.profile = { type, id, data: null };
+  setTab("team"); panel.scrollTop = 0; render(true);
+  try {
+    const data = await client.get(`/api/${type === "driver" ? "drivers" : "vehicles"}/${id}/profile?date=${S.teamDate}`);
+    if (S.profile?.id === id && S.profile.type === type) { S.profile.data = data; lastPanel = ""; render(true); }
+  } catch (e) { toast(e.message, true); S.profile = null; render(true); }
 }
 async function loadAnalytics() {
   try { S.analytics = await client.get(`/api/analytics?date=${S.anDate}`); render(true); } catch (e) { toast(e.message, true); }
@@ -249,11 +280,13 @@ function render(force) {
   const ae = document.activeElement;
   const typing = ae && panel.contains(ae) && ["SELECT", "INPUT", "TEXTAREA"].includes(ae.tagName);
   if (force || (!holdPanel && !typing)) {
-    const html = { vehicle: vehiclePanel, routes: routesPanel, analytics: analyticsPanel, alerts: alertsPanel, setup: setupPanel }[S.tab]();
+    const html = { vehicle: vehiclePanel, routes: routesPanel, analytics: analyticsPanel, alerts: alertsPanel, team: () => teamPanel(S), setup: setupPanel }[S.tab]();
     if (html !== lastPanel) { const st = panel.scrollTop; panel.innerHTML = html; panel.scrollTop = st; lastPanel = html; }
   }
   const open = S.alerts.filter((a) => !a.acked_at && a.severity !== "info").length;
   $("#acnt").hidden = !open; $("#acnt").textContent = open;
+  const pending = S.users.filter((u) => u.approval === "pending").length;
+  $("#tcnt").hidden = !pending; $("#tcnt").textContent = pending;
   drawOverlay();
 }
 const todayRoutes = () => [...S.routes.values()].filter((r) => r.service_date === localDate() && r.status !== "draft");
@@ -348,6 +381,8 @@ function vehiclePanel() {
   if (r && ["dispatched", "active"].includes(r.status)) h += `<button class="btn danger ${S.armed === "cancel" + r.id ? "armed" : ""}" data-act="rcancel" data-rid="${r.id}">${S.armed === "cancel" + r.id ? "Confirm cancel" : "Cancel route"}</button>`;
   if (!r && v.status !== "maint") h += `<button class="btn primary" data-act="newroute" data-vid="${v.id}">Plan a route</button>`;
   h += `<button class="btn" data-act="maint" data-vid="${v.id}" data-on="${v.maintenance ? 0 : 1}">${v.maintenance ? "Return to service" : "Mark in maintenance"}</button>`;
+  h += `<button class="btn" data-act="teamveh" data-id="${v.id}">Condition &amp; performance</button>`;
+  if (v.driver) h += `<button class="btn" data-act="teamdrv" data-id="${v.driver.id}">${esc(v.driver.name.split(" ")[0])}'s profile</button>`;
   return h + `</div>`;
 }
 function vehicleOptions(selected, routeId = null) {
@@ -475,9 +510,21 @@ function alertsPanel() {
 const fv = (k) => esc(S.forms[k] ?? "");
 // Alert text often starts with the vehicle code, which the UI already shows as a link.
 const alertText = (a) => (a.vehicle_code && a.message.startsWith(a.vehicle_code + " ") ? a.message.slice(a.vehicle_code.length + 1) : a.message);
+// Inline "set a new password" row for admins resetting someone else's password.
+function resetRow(u) {
+  if (S.resetFor !== u.id) return `<button class="btn sm" data-act="pwreset" data-id="${u.id}">Reset password</button>`;
+  return `<span class="row"><input class="inp" type="password" data-f="reset.pw" value="${fv("reset.pw")}" placeholder="New password (8+)" aria-label="New password for ${esc(u.name)}" autocomplete="new-password">
+    <button class="btn sm primary" data-act="pwresetsave" data-id="${u.id}">Save</button><button class="btn sm" data-act="pwresetcancel">Cancel</button></span>`;
+}
 function setupPanel() {
   const isAdmin = S.me.role === "admin";
-  let h = `<h3>Places</h3>`;
+  let h = `<h3>Your account</h3>
+    <div class="form" style="margin-bottom:4px"><span class="muted">Signed in as <b>${esc(S.me.username)}</b> (${esc(S.me.role)}). Changing your password signs you out on your other devices.</span>
+    <input class="inp" type="password" data-f="pw.current" value="${fv("pw.current")}" placeholder="Current password" aria-label="Current password" autocomplete="current-password">
+    <div class="two"><input class="inp" type="password" data-f="pw.new" value="${fv("pw.new")}" placeholder="New password (8+ characters)" aria-label="New password" autocomplete="new-password">
+    <input class="inp" type="password" data-f="pw.confirm" value="${fv("pw.confirm")}" placeholder="Repeat new password" aria-label="Repeat new password" autocomplete="new-password"></div>
+    <div><button class="btn sm primary" data-act="pwchange">Change password</button></div></div>`;
+  h += `<h3>Places</h3>`;
   if (S.placeDraft) {
     h += `<div class="builder form"><b>New place</b>
       <label>Name<input class="inp" data-f="place.name" value="${fv("place.name")}" placeholder="e.g. Bayview Pharmacy"></label>
@@ -490,13 +537,21 @@ function setupPanel() {
 
   h += `<h3>Drivers</h3>`;
   if (isAdmin) h += `<div class="form" style="margin-bottom:8px"><div class="two"><input class="inp" data-f="drv.name" placeholder="Full name" value="${fv("drv.name")}" aria-label="Driver name"><input class="inp" data-f="drv.phone" placeholder="Phone" value="${fv("drv.phone")}" aria-label="Driver phone"></div>
-    <div class="two"><input class="inp" data-f="drv.username" placeholder="Username" value="${fv("drv.username")}" aria-label="Driver username" autocomplete="off"><input class="inp" type="password" data-f="drv.password" placeholder="Password (6+ characters)" value="${fv("drv.password")}" aria-label="Driver password" autocomplete="new-password"></div>
+    <div class="two"><input class="inp" data-f="drv.username" placeholder="Username" value="${fv("drv.username")}" aria-label="Driver username" autocomplete="off"><input class="inp" type="password" data-f="drv.password" placeholder="Password (8+ characters)" value="${fv("drv.password")}" aria-label="Driver password" autocomplete="new-password"></div>
+    <div class="two"><input class="inp" data-f="drv.license" placeholder="Licence number (optional)" value="${fv("drv.license")}" aria-label="Licence number">
+    <select data-f="drv.vehicle" aria-label="Vehicle"><option value="">Assign vehicle (optional)…</option>${[...S.fleet.values()].map((v) => `<option value="${v.id}" ${String(S.forms["drv.vehicle"]) === String(v.id) ? "selected" : ""}>${esc(v.code)} · ${esc(v.type)}</option>`).join("")}</select></div>
     <div><button class="btn sm primary" data-act="dadd">Add driver</button></div></div>`;
-  h += `<ul class="list">${S.drivers.map((d) => `<li><span>${esc(d.name)} <span class="muted mono">@${esc(d.username)}</span>${d.active ? "" : ` <span class="muted">(disabled)</span>`}</span><span class="muted">${d.on_shift_vehicle ? "On shift · " + esc(d.on_shift_vehicle) : "Off shift"}</span></li>`).join("")}</ul>`;
+  h += `<ul class="list">${S.drivers.map((d) => `<li><span><button class="btn link" data-act="teamdrv" data-id="${d.id}">${esc(d.name)}</button> <span class="muted mono">@${esc(d.username)}${d.usual_vehicle ? " · " + esc(d.usual_vehicle) : ""}</span>${d.active ? "" : ` <span class="muted">(disabled)</span>`}</span><span class="row"><span class="muted">${d.on_shift_vehicle ? "On shift · " + esc(d.on_shift_vehicle) : "Off shift"}</span>${isAdmin ? resetRow(d) : ""}</span></li>`).join("")}</ul>`;
+  if (isAdmin) {
+    const staff = S.users.filter((u) => u.role !== "driver" && u.id !== S.me.id);
+    h += `<h3>Staff</h3>${staff.length ? `<ul class="list">${staff.map((u) => `<li><span>${esc(u.name)} <span class="muted mono">@${esc(u.username)} · ${esc(u.role)}</span></span>${resetRow(u)}</li>`).join("")}</ul>` : `<p class="muted">No other staff accounts.</p>`}
+      <p class="muted" style="font-size:12px">Resetting a password signs that person out on all their devices. A driver on shift stops sending GPS until they sign in again.</p>`;
+  }
 
   h += `<h3>Vehicles</h3>`;
   if (isAdmin) h += `<div class="form" style="margin-bottom:8px"><div class="two"><input class="inp" data-f="veh.code" placeholder="Code, e.g. VAN-206" value="${fv("veh.code")}" aria-label="Vehicle code"><input class="inp" data-f="veh.type" placeholder="Type, e.g. Cargo van" value="${fv("veh.type")}" aria-label="Vehicle type"></div>
     <div class="two"><input class="inp" data-f="veh.plate" placeholder="Plate" value="${fv("veh.plate")}" aria-label="Plate"><input class="inp" type="number" data-f="veh.limit" placeholder="Speed limit km/h (90)" value="${fv("veh.limit")}" aria-label="Speed limit"></div>
+    <div class="two"><input class="inp" type="number" min="0" data-f="veh.odo" placeholder="Odometer now (km)" value="${fv("veh.odo")}" aria-label="Current odometer in km"><input class="inp" type="number" min="1000" data-f="veh.interval" placeholder="Service every (km), 10000" value="${fv("veh.interval")}" aria-label="Service interval in km"></div>
     <div class="two"><select data-f="veh.depot" aria-label="Home depot"><option value="">Home depot…</option>${S.depots.map((d) => `<option value="${d.id}" ${String(S.forms["veh.depot"]) === String(d.id) ? "selected" : ""}>${esc(d.name)}</option>`).join("")}</select>
     <select data-f="veh.driver" aria-label="Usual driver"><option value="">Usual driver…</option>${S.drivers.map((d) => `<option value="${d.id}" ${String(S.forms["veh.driver"]) === String(d.id) ? "selected" : ""}>${esc(d.name)}</option>`).join("")}</select></div>
     <div><button class="btn sm primary" data-act="vadd">Add vehicle</button></div></div>`;
@@ -518,6 +573,7 @@ panel.addEventListener("input", (e) => {
 panel.addEventListener("change", (e) => {
   const t = e.target;
   if (t.id === "anDate") { S.anDate = t.value || localDate(); S.analytics = null; loadAnalytics(); t.blur(); return; }
+  if (t.id === "teamDate") { S.teamDate = t.value || localDate(); S.team = null; loadTeam(); t.blur(); return; }
   if (t.dataset.f) S.forms[t.dataset.f] = t.value;
   if (t.dataset.b === "depot") S.builder.depot = t.value;
   if (t.dataset.b === "vehicle") {
@@ -573,17 +629,55 @@ panel.addEventListener("click", async (e) => {
       toast(`${p.name} added`);
     } else if (act === "pzoom") { const p = S.places.find((x) => x.id === Number(b.dataset.id)); if (p) { map.setView([p.lat, p.lng], 16); placeMarkers.get(p.id)?.openTooltip(); } return; }
     else if (act === "pdel") { const pid = Number(b.dataset.id); if (!arm("pdel" + pid)) return; await client.del(`/api/places/${pid}`); S.places = S.places.filter((p) => p.id !== pid); drawPlaces(); toast("Place deleted"); }
+    else if (act === "teamdrv") { await openProfile("driver", Number(b.dataset.id)); return; }
+    else if (act === "teamveh") { await openProfile("vehicle", Number(b.dataset.id)); return; }
+    else if (act === "teamback") { S.profile = null; loadTeam(); }
+    else if (act === "approve") {
+      const uid = Number(b.dataset.id), sel = panel.querySelector(`select[data-approve="${uid}"]`);
+      await client.post(`/api/users/${uid}/approve`, { vehicle_id: sel?.value || null });
+      const u = S.users.find((x) => x.id === uid);
+      S.drivers = await client.get("/api/drivers"); await loadTeam(); refreshFleet();
+      toast(`${u ? u.name : "Driver"} approved. They can sign in now.`);
+    } else if (act === "decline") {
+      const uid = Number(b.dataset.id);
+      if (!arm("decline" + uid)) return;
+      await client.post(`/api/users/${uid}/decline`); await loadTeam(); toast("Sign-up declined.");
+    } else if (act === "service") {
+      const vid = Number(b.dataset.id);
+      const data = await client.post(`/api/vehicles/${vid}/service`, { note: S.forms["svc.note"] || "" });
+      delete S.forms["svc.note"];
+      if (S.profile?.type === "vehicle" && S.profile.id === vid) S.profile.data = data;
+      toast(`Service recorded for ${data.vehicle.code}.`);
+    }
+    else if (act === "pwchange") {
+      const cur = S.forms["pw.current"] || "", next = S.forms["pw.new"] || "";
+      if (!cur || !next) { toast("Enter your current password and a new one.", true); return; }
+      if (next !== S.forms["pw.confirm"]) { toast("The two new passwords don't match.", true); return; }
+      const r = await client.post("/api/me/password", { current_password: cur, new_password: next });
+      client.setToken(r.token);
+      if (socket) socket.auth.token = r.token;
+      ["pw.current", "pw.new", "pw.confirm"].forEach((k) => delete S.forms[k]);
+      toast("Password changed. Your other devices have been signed out.");
+    } else if (act === "pwreset") { S.resetFor = Number(b.dataset.id); delete S.forms["reset.pw"]; }
+    else if (act === "pwresetcancel") { S.resetFor = null; delete S.forms["reset.pw"]; }
+    else if (act === "pwresetsave") {
+      const uid = Number(b.dataset.id), u = S.users.find((x) => x.id === uid);
+      await client.post(`/api/users/${uid}/password`, { new_password: S.forms["reset.pw"] || "" });
+      S.resetFor = null; delete S.forms["reset.pw"];
+      toast(`New password set for ${u ? u.name : "that user"}. They've been signed out everywhere.`);
+    }
     else if (act === "dadd") {
-      const d = await client.post("/api/drivers", { name: S.forms["drv.name"], username: S.forms["drv.username"], password: S.forms["drv.password"], phone: S.forms["drv.phone"] });
-      S.drivers = await client.get("/api/drivers"); ["drv.name", "drv.username", "drv.password", "drv.phone"].forEach((k) => delete S.forms[k]);
+      const d = await client.post("/api/drivers", { name: S.forms["drv.name"], username: S.forms["drv.username"], password: S.forms["drv.password"], phone: S.forms["drv.phone"], license_no: S.forms["drv.license"], vehicle_id: S.forms["drv.vehicle"] || null });
+      S.drivers = await client.get("/api/drivers"); if (S.me.role === "admin") S.users = await client.get("/api/users"); ["drv.name", "drv.username", "drv.password", "drv.phone", "drv.license", "drv.vehicle"].forEach((k) => delete S.forms[k]);
       toast(`${d.name} can now sign in to the driver app as ${d.username}`);
     } else if (act === "vadd") {
-      const v = await client.post("/api/vehicles", { code: S.forms["veh.code"], type: S.forms["veh.type"], plate: S.forms["veh.plate"], speed_limit_kmh: S.forms["veh.limit"], depot_id: S.forms["veh.depot"], default_driver_id: S.forms["veh.driver"] });
-      ["veh.code", "veh.type", "veh.plate", "veh.limit", "veh.depot", "veh.driver"].forEach((k) => delete S.forms[k]);
+      const v = await client.post("/api/vehicles", { code: S.forms["veh.code"], type: S.forms["veh.type"], plate: S.forms["veh.plate"], speed_limit_kmh: S.forms["veh.limit"], depot_id: S.forms["veh.depot"], default_driver_id: S.forms["veh.driver"], odometer_km: S.forms["veh.odo"], service_interval_km: S.forms["veh.interval"] });
+      ["veh.code", "veh.type", "veh.plate", "veh.limit", "veh.depot", "veh.driver", "veh.odo", "veh.interval"].forEach((k) => delete S.forms[k]);
       await refreshFleet(); toast(`${v.code} added`);
     }
   } catch (err) { toast(err.message, true); }
   S.armed = null;
+  lastPanel = ""; // redraw even if the markup is unchanged, so cleared form fields really clear
   render(true);
 });
 

@@ -1,6 +1,6 @@
 // App-shell cache so the driver app opens without signal. API calls always go to the network.
-const CACHE = "fleetline-driver-v2";
-const SHELL = ["/driver/", "/driver/app.js", "/driver/style.css", "/driver/icon.svg", "/driver/manifest.webmanifest",
+const CACHE = "fleetline-driver-v4";
+const SHELL = ["/driver/", "/driver/app.js", "/driver/extras.js", "/driver/style.css", "/driver/icon.svg", "/driver/manifest.webmanifest",
   "/shared/client.js", "/vendor/leaflet/leaflet.js", "/vendor/leaflet/leaflet.css"];
 
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL))); self.skipWaiting(); });

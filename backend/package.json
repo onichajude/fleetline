@@ -11,7 +11,7 @@
     "seed": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning server/seed.js",
     "simulate": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning scripts/simulate.js",
     "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js",
-    "check": "node --check server/index.js && node --check public/dispatch/app.js && node --check public/driver/app.js"
+    "check": "node --check server/index.js && node --check server/stats.js && node --check server/seed.js && node --check public/dispatch/app.js && node --check public/dispatch/team.js && node --check public/driver/app.js && node --check public/driver/extras.js"
   },
   "dependencies": {
     "express": "^4.21.2",

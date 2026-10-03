@@ -32,6 +32,12 @@ export function createClient(storageKey) {
       return s;
     },
     logout,
+    /** Keeps the session after a password change, which invalidates the old token. */
+    setToken(token) {
+      if (!session) return;
+      session = { ...session, token };
+      try { localStorage.setItem(storageKey, JSON.stringify(session)); } catch {}
+    },
     get: (u) => request("GET", u),
     post: (u, b = {}) => request("POST", u, b),
     patch: (u, b = {}) => request("PATCH", u, b),

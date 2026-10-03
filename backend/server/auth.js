@@ -27,14 +27,25 @@ export function verifyPassword(pw, stored) {
   return crypto.timingSafeEqual(hash, Buffer.from(hashHex, "hex"));
 }
 
-export const signToken = (user) => jwt.sign({ sub: user.id, role: user.role }, SECRET, { expiresIn: TOKEN_TTL });
+export const signToken = (user) => jwt.sign({ sub: user.id, role: user.role, ver: user.token_version ?? 0 }, SECRET, { expiresIn: TOKEN_TTL });
+
+export const MIN_PASSWORD = 8;
+/** Returns an error message for an unacceptable new password, or null. */
+export function passwordProblem(pw, username = "") {
+  if (typeof pw !== "string" || pw.length < MIN_PASSWORD) return `Passwords need at least ${MIN_PASSWORD} characters.`;
+  if (pw.length > 200) return "Passwords can be at most 200 characters.";
+  if (username && pw.toLowerCase() === String(username).toLowerCase()) return "Choose a password that isn't your username.";
+  return null;
+}
 
 /** Returns the active user for a token, or null. */
 export function userFromToken(token) {
   try {
     const p = jwt.verify(token, SECRET);
-    const u = one("SELECT id, name, username, role, phone, active FROM users WHERE id = ?", p.sub);
-    return u && u.active ? u : null;
+    const u = one("SELECT id, name, username, role, phone, active, token_version FROM users WHERE id = ?", p.sub);
+    if (!u || !u.active || (p.ver ?? 0) !== u.token_version) return null;
+    delete u.token_version;
+    return u;
   } catch { return null; }
 }
 

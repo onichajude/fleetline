@@ -1,7 +1,8 @@
 import express from "express";
 import { one, all, run, tx, localDate } from "./db.js";
-import { requireAuth, verifyPassword, hashPassword, signToken, loginThrottled, noteLoginFailure, clearLoginFailures } from "./auth.js";
+import { requireAuth, verifyPassword, hashPassword, signToken, loginThrottled, noteLoginFailure, clearLoginFailures, passwordProblem } from "./auth.js";
 import * as F from "./fleet.js";
+import * as Stats from "./stats.js";
 
 export const api = express.Router();
 const staff = requireAuth("admin", "dispatcher");
@@ -22,6 +23,8 @@ api.post("/auth/login", h(async (req, res) => {
   if (loginThrottled(key)) return res.status(429).json({ error: "Too many attempts. Wait 10 minutes and try again." });
   const u = one("SELECT * FROM users WHERE username = ? AND active = 1", username);
   if (!u || !verifyPassword(password, u.pass_hash)) { noteLoginFailure(key); return res.status(401).json({ error: "Username or password is incorrect." }); }
+  if (u.approval === "pending") return res.status(403).json({ error: "Your account is waiting for approval. Your dispatcher will let you know when it's ready." });
+  if (u.approval === "declined") return res.status(403).json({ error: "Your sign-up wasn't approved. Contact your dispatcher." });
   if (req.body?.app && req.body.app !== (u.role === "driver" ? "driver" : "dispatch")) {
     return res.status(403).json({ error: u.role === "driver" ? "Drivers sign in through the driver app." : "Use the dispatch console to sign in." });
   }
@@ -29,6 +32,45 @@ api.post("/auth/login", h(async (req, res) => {
   res.json({ token: signToken(u), user: { id: u.id, name: u.name, username: u.username, role: u.role } });
 }));
 api.get("/me", requireAuth(), (req, res) => res.json(req.user));
+
+// Drivers can request an account; it stays pending until an admin approves it and assigns a vehicle.
+const signups = new Map(); // ip -> timestamps of recent sign-ups
+api.post("/auth/register", (req, res) => {
+  const recent = (signups.get(req.ip) || []).filter((t) => Date.now() - t < 3600e3);
+  if (recent.length >= 5) return res.status(429).json({ error: "Too many sign-ups from this network. Try again in an hour." });
+  const name = str(req.body?.name, 80), username = str(req.body?.username, 40).toLowerCase(), password = String(req.body?.password || "");
+  const phone = str(req.body?.phone, 30), license = str(req.body?.license_no, 40);
+  const pref = ["truck", "van", "either"].includes(req.body?.vehicle_type) ? req.body.vehicle_type : "either";
+  if (!name) throw bad("Enter your full name.");
+  if (!phone) throw bad("Enter a phone number your dispatcher can reach you on.");
+  if (!/^[a-z0-9._-]{3,40}$/.test(username)) throw bad("Usernames use 3–40 letters, numbers, dots, dashes or underscores.");
+  const problem = passwordProblem(password, username);
+  if (problem) throw bad(problem);
+  if (one("SELECT 1 FROM users WHERE username = ?", username)) throw bad(`The username ${username} is taken. Choose another.`);
+  run(`INSERT INTO users (name, username, role, pass_hash, phone, license_no, signup_note, approval, created_at) VALUES (?,?,?,?,?,?,?,?,?)`,
+    name, username, "driver", hashPassword(password), phone, license || null, `Prefers: ${pref}`, "pending", Date.now());
+  signups.set(req.ip, [...recent, Date.now()]);
+  F.addAlert({ kind: "signup", severity: "warn", message: `New driver sign-up: ${name} (@${username}) is waiting for approval` });
+  res.status(201).json({ ok: true, message: "Thanks! Your dispatcher will review your sign-up and assign your vehicle." });
+});
+
+/** Sets a password and signs the user out everywhere else. Returns a fresh token for the user. */
+function setPassword(userId, password) {
+  run("UPDATE users SET pass_hash = ?, token_version = token_version + 1 WHERE id = ?", hashPassword(password), userId);
+  return signToken(one("SELECT * FROM users WHERE id = ?", userId));
+}
+api.post("/me/password", requireAuth(), (req, res) => {
+  const current = String(req.body?.current_password || ""), next = String(req.body?.new_password || "");
+  const key = `pw|${req.user.id}|${req.ip}`;
+  if (loginThrottled(key)) return res.status(429).json({ error: "Too many attempts. Wait 10 minutes and try again." });
+  const u = one("SELECT * FROM users WHERE id = ?", req.user.id);
+  if (!verifyPassword(current, u.pass_hash)) { noteLoginFailure(key); throw bad("Your current password is incorrect."); }
+  clearLoginFailures(key);
+  const problem = passwordProblem(next, u.username);
+  if (problem) throw bad(problem);
+  if (verifyPassword(next, u.pass_hash)) throw bad("Choose a new password that's different from your current one.");
+  res.json({ token: setPassword(u.id, next) });
+});
 api.get("/config", (req, res) => res.json({
   // Esri World Street Map works without an API key for testing. OpenStreetMap's own tile servers
   // block app traffic and CARTO now requires a key. Use a keyed provider in production.
@@ -49,8 +91,11 @@ api.post("/vehicles", admin, (req, res) => {
   const code = str(req.body.code, 20).toUpperCase(), type = str(req.body.type, 40) || "Van";
   if (!code) throw bad("Enter a vehicle code, e.g. VAN-12.");
   if (one("SELECT 1 FROM vehicles WHERE code = ?", code)) throw bad(`${code} already exists.`);
-  const r = run("INSERT INTO vehicles (code, type, plate, depot_id, default_driver_id, speed_limit_kmh, created_at) VALUES (?,?,?,?,?,?,?)",
-    code, type, str(req.body.plate, 20) || null, num(req.body.depot_id), num(req.body.default_driver_id), num(req.body.speed_limit_kmh) || 90, Date.now());
+  const odo = Math.max(0, num(req.body.odometer_km) || 0);
+  const r = run(`INSERT INTO vehicles (code, type, plate, depot_id, default_driver_id, speed_limit_kmh, odometer_km, last_service_km, service_interval_km, created_at)
+                 VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    code, type, str(req.body.plate, 20) || null, num(req.body.depot_id), num(req.body.default_driver_id), num(req.body.speed_limit_kmh) || 90,
+    odo, Math.max(0, num(req.body.last_service_km) ?? odo), num(req.body.service_interval_km) || 10000, Date.now());
   res.status(201).json(one("SELECT * FROM vehicles WHERE id = ?", r.lastInsertRowid));
 });
 api.patch("/vehicles/:id", staff, (req, res) => {
@@ -60,33 +105,106 @@ api.patch("/vehicles/:id", staff, (req, res) => {
     b.type !== undefined ? str(b.type, 40) : v.type, b.plate !== undefined ? str(b.plate, 20) || null : v.plate,
     b.depot_id !== undefined ? num(b.depot_id) : v.depot_id, b.default_driver_id !== undefined ? num(b.default_driver_id) : v.default_driver_id,
     b.maintenance !== undefined ? (b.maintenance ? 1 : 0) : v.maintenance, b.speed_limit_kmh !== undefined ? num(b.speed_limit_kmh) || 90 : v.speed_limit_kmh, vid);
+  if (b.odometer_km !== undefined && Number.isFinite(num(b.odometer_km))) run("UPDATE vehicles SET odometer_km = ? WHERE id = ?", Math.max(0, num(b.odometer_km)), vid);
+  if (b.service_interval_km !== undefined && num(b.service_interval_km) > 0) run("UPDATE vehicles SET service_interval_km = ? WHERE id = ?", num(b.service_interval_km), vid);
   if (b.maintenance !== undefined && !!b.maintenance !== !!v.maintenance)
     F.addAlert({ vehicleId: vid, kind: "maintenance", severity: "info", message: `${v.code} ${b.maintenance ? "sent to maintenance" : "returned to service"}` });
   F.notifyVehicle(vid);
   res.json(one("SELECT * FROM vehicles WHERE id = ?", vid));
 });
 
+api.post("/vehicles/:id/service", staff, (req, res) => {
+  const vid = id(req.params.id), v = one("SELECT * FROM vehicles WHERE id = ?", vid);
+  if (!v) throw F.httpError(404, "Vehicle not found.");
+  const now = Date.now(), note = str(req.body?.note, 300) || null;
+  run("INSERT INTO services (vehicle_id, user_id, odometer_km, note, created_at) VALUES (?,?,?,?,?)", vid, req.user.id, v.odometer_km, note, now);
+  run("UPDATE vehicles SET last_service_at = ?, last_service_km = odometer_km WHERE id = ?", now, vid);
+  F.addAlert({ vehicleId: vid, kind: "service", severity: "info", message: `${v.code} serviced at ${Math.round(v.odometer_km).toLocaleString("en-US")} km${note ? `: ${note}` : ""}` });
+  F.notifyVehicle(vid);
+  res.json(Stats.vehicleProfile(vid));
+});
+
+/* ---------- performance ---------- */
+const dateParam = (q) => (/^\d{4}-\d{2}-\d{2}$/.test(q || "") ? q : localDate());
+api.get("/team", staff, (req, res) => {
+  const date = dateParam(req.query.date);
+  res.json({ ...Stats.leaderboard(date), vehicles: Stats.allVehicleConditions() });
+});
+api.get("/drivers/:id/profile", staff, (req, res) => {
+  const p = Stats.driverProfile(id(req.params.id), dateParam(req.query.date));
+  if (!p) throw F.httpError(404, "Driver not found.");
+  res.json(p);
+});
+api.get("/vehicles/:id/profile", staff, (req, res) => {
+  const p = Stats.vehicleProfile(id(req.params.id), dateParam(req.query.date));
+  if (!p) throw F.httpError(404, "Vehicle not found.");
+  res.json(p);
+});
+
 /* ---------- drivers ---------- */
 api.get("/drivers", staff, (req, res) => res.json(all(`SELECT u.id, u.name, u.username, u.phone, u.active,
-  (SELECT v.code FROM shifts s JOIN vehicles v ON v.id = s.vehicle_id WHERE s.driver_id = u.id AND s.ended_at IS NULL) AS on_shift_vehicle
-  FROM users u WHERE u.role = 'driver' ORDER BY u.name`)));
+  (SELECT v.code FROM shifts s JOIN vehicles v ON v.id = s.vehicle_id WHERE s.driver_id = u.id AND s.ended_at IS NULL) AS on_shift_vehicle,
+  (SELECT v.code FROM vehicles v WHERE v.default_driver_id = u.id ORDER BY v.id LIMIT 1) AS usual_vehicle
+  FROM users u WHERE u.role = 'driver' AND u.approval = 'approved' ORDER BY u.name`)));
+/** Makes `vehicleId` the driver's usual vehicle (shown first when they start a shift). */
+function assignVehicle(driverId, vehicleId) {
+  if (!vehicleId) return;
+  if (!one("SELECT 1 FROM vehicles WHERE id = ?", vehicleId)) throw bad("That vehicle doesn't exist.");
+  run("UPDATE vehicles SET default_driver_id = ? WHERE id = ?", driverId, vehicleId);
+}
 api.post("/drivers", admin, (req, res) => {
   const name = str(req.body.name, 80), username = str(req.body.username, 40).toLowerCase(), password = String(req.body.password || "");
   if (!name || !username) throw bad("Enter the driver's name and a username.");
   if (!/^[a-z0-9._-]{3,40}$/.test(username)) throw bad("Usernames use 3–40 letters, numbers, dots, dashes or underscores.");
-  if (password.length < 6) throw bad("Passwords need at least 6 characters.");
+  const problem = passwordProblem(password, username);
+  if (problem) throw bad(problem);
   if (one("SELECT 1 FROM users WHERE username = ?", username)) throw bad(`The username ${username} is taken.`);
-  const r = run("INSERT INTO users (name, username, role, pass_hash, phone, created_at) VALUES (?,?,?,?,?,?)", name, username, "driver", hashPassword(password), str(req.body.phone, 30) || null, Date.now());
+  const r = run("INSERT INTO users (name, username, role, pass_hash, phone, license_no, created_at) VALUES (?,?,?,?,?,?,?)", name, username, "driver", hashPassword(password), str(req.body.phone, 30) || null, str(req.body.license_no, 40) || null, Date.now());
+  assignVehicle(Number(r.lastInsertRowid), num(req.body.vehicle_id));
   res.status(201).json(one("SELECT id, name, username, phone, active FROM users WHERE id = ?", r.lastInsertRowid));
 });
 api.patch("/drivers/:id", admin, (req, res) => {
   const uid = id(req.params.id), u = one("SELECT * FROM users WHERE id = ? AND role = 'driver'", uid);
   if (!u) throw F.httpError(404, "Driver not found.");
-  if (req.body.password) { if (String(req.body.password).length < 6) throw bad("Passwords need at least 6 characters."); run("UPDATE users SET pass_hash = ? WHERE id = ?", hashPassword(String(req.body.password)), uid); }
+  if (req.body.password) {
+    const problem = passwordProblem(String(req.body.password), u.username);
+    if (problem) throw bad(problem);
+    setPassword(uid, String(req.body.password));
+  }
   if (req.body.active !== undefined) run("UPDATE users SET active = ? WHERE id = ?", req.body.active ? 1 : 0, uid);
   if (req.body.phone !== undefined) run("UPDATE users SET phone = ? WHERE id = ?", str(req.body.phone, 30) || null, uid);
   if (req.body.name) run("UPDATE users SET name = ? WHERE id = ?", str(req.body.name, 80), uid);
+  if (req.body.vehicle_id !== undefined) assignVehicle(uid, num(req.body.vehicle_id));
   res.json(one("SELECT id, name, username, phone, active FROM users WHERE id = ?", uid));
+});
+
+/* ---------- user accounts (admin) ---------- */
+api.get("/users", admin, (req, res) => res.json(all(`SELECT id, name, username, role, active, approval, phone, license_no, signup_note, created_at
+  FROM users ORDER BY role, name`)));
+api.post("/users/:id/approve", admin, (req, res) => {
+  const uid = id(req.params.id), u = one("SELECT * FROM users WHERE id = ? AND approval != 'approved'", uid);
+  if (!u) throw F.httpError(404, "That sign-up was already handled.");
+  assignVehicle(uid, num(req.body?.vehicle_id));
+  run("UPDATE users SET approval = 'approved' WHERE id = ?", uid);
+  const v = one("SELECT code FROM vehicles WHERE default_driver_id = ? ORDER BY id LIMIT 1", uid);
+  F.addAlert({ kind: "signup", severity: "info", message: `${u.name} (@${u.username}) approved${v ? ` and assigned ${v.code}` : ""}` });
+  res.json({ ok: true });
+});
+api.post("/users/:id/decline", admin, (req, res) => {
+  const uid = id(req.params.id), u = one("SELECT * FROM users WHERE id = ? AND approval = 'pending'", uid);
+  if (!u) throw F.httpError(404, "That sign-up was already handled.");
+  run("UPDATE users SET approval = 'declined', token_version = token_version + 1 WHERE id = ?", uid);
+  res.json({ ok: true });
+});
+api.post("/users/:id/password", admin, (req, res) => {
+  const uid = id(req.params.id), u = one("SELECT * FROM users WHERE id = ?", uid);
+  if (!u) throw F.httpError(404, "User not found.");
+  const password = String(req.body?.new_password || "");
+  const problem = passwordProblem(password, u.username);
+  if (problem) throw bad(problem);
+  const token = setPassword(uid, password);
+  // Admins resetting their own password stay signed in on this device.
+  res.json(uid === req.user.id ? { ok: true, token } : { ok: true });
 });
 
 /* ---------- places ---------- */
@@ -202,9 +320,30 @@ function driverState(user) {
   const finished = vehicle && !route && shift
     ? one("SELECT id FROM routes WHERE vehicle_id = ? AND status IN ('completed','cancelled') AND completed_at > ? ORDER BY completed_at DESC LIMIT 1", vehicle.id, shift.started_at)
     : null;
-  return { user, shift: shift ?? null, vehicle, vehicles, route: route ? F.routeWithStops(route.id) : null, finished: finished ? F.routeWithStops(finished.id) : null, config: { geofenceM: F.CFG.geofenceM } };
+  const inspected = shift ? !!one("SELECT 1 FROM inspections WHERE shift_id = ?", shift.id) : false;
+  return { user, shift: shift ?? null, vehicle, vehicles, inspection_done: inspected, inspection_items: Stats.INSPECTION_ITEMS, route: route ? F.routeWithStops(route.id) : null, finished: finished ? F.routeWithStops(finished.id) : null, config: { geofenceM: F.CFG.geofenceM } };
 }
 api.get("/driver/state", driverOnly, (req, res) => res.json(driverState(req.user)));
+api.get("/driver/profile", driverOnly, (req, res) => res.json(Stats.driverProfile(req.user.id, dateParam(req.query.date))));
+api.post("/driver/inspection", driverOnly, (req, res) => {
+  const s = F.driverShift(req.user.id);
+  if (!s) throw F.httpError(409, "Start a shift before doing the pre-trip check.");
+  const items = {};
+  for (const [k] of Stats.INSPECTION_ITEMS) {
+    const val = req.body?.items?.[k];
+    if (!["ok", "issue"].includes(val)) throw bad("Mark every item as OK or Problem.");
+    items[k] = val;
+  }
+  const issues = Stats.INSPECTION_ITEMS.filter(([k]) => items[k] === "issue").map(([, l]) => l);
+  const notes = str(req.body?.notes, 500) || null;
+  if (issues.length && !notes) throw bad("Describe the problem so the workshop knows what to fix.");
+  run("INSERT INTO inspections (vehicle_id, driver_id, shift_id, items, issues, notes, created_at) VALUES (?,?,?,?,?,?,?)",
+    s.vehicle_id, req.user.id, s.id, JSON.stringify(items), issues.length, notes, Date.now());
+  const v = one("SELECT code FROM vehicles WHERE id = ?", s.vehicle_id);
+  if (issues.length) F.addAlert({ vehicleId: s.vehicle_id, kind: "inspection", severity: "warn", message: `${v.code} pre-trip check: problem with ${issues.join(", ")}. "${notes}"` });
+  F.notifyVehicle(s.vehicle_id);
+  res.json(driverState(req.user));
+});
 api.post("/driver/shift/start", driverOnly, (req, res) => {
   if (F.driverShift(req.user.id)) return res.json(driverState(req.user));
   const vid = id(req.body.vehicle_id), v = one("SELECT * FROM vehicles WHERE id = ?", vid);

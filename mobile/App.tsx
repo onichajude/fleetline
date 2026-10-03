@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AppState, RefreshControl, ScrollView, Text, View } from "react-native";
+import { AppState, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { io, type Socket } from "socket.io-client";
@@ -8,12 +8,16 @@ import { ago } from "./src/format";
 import { LoginScreen } from "./src/screens/LoginScreen";
 import { RouteScreen } from "./src/screens/RouteScreen";
 import { ShiftScreen } from "./src/screens/ShiftScreen";
+import { ChangePassword } from "./src/screens/ChangePassword";
+import { CheckCard } from "./src/screens/CheckCard";
+import { SignupScreen } from "./src/screens/SignupScreen";
+import { StatsScreen } from "./src/screens/StatsScreen";
 import { clearSession, lastFix, lastSent, loadSession, readQueue } from "./src/storage";
 import { mono, useTheme } from "./src/theme";
 import {
   flush, isTracking, permissionStatus, requestPermissions, setupNotifications, startTracking, stopTracking, type PermissionResult,
 } from "./src/tracking";
-import type { DriverState, GpsPoint, Session } from "./src/types";
+import type { DriverProfile, DriverState, GpsPoint, Session } from "./src/types";
 import { Button, Card, Notice } from "./src/ui";
 
 type Gps = { tracking: boolean; fix: GpsPoint | null; queued: number; sentAt: number | null };
@@ -35,6 +39,18 @@ function Main() {
   const [toast, setToast] = useState<{ msg: string; err: boolean } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [endArmed, setEndArmed] = useState(false);
+  const [signupServer, setSignupServer] = useState<string | null>(null);
+  const [view, setView] = useState<"today" | "stats">("today");
+  const [profile, setProfile] = useState<DriverProfile | null>(null);
+  const [checkLater, setCheckLater] = useState(false);
+
+  async function openView(v: "today" | "stats") {
+    setView(v);
+    if (v === "stats" && session) {
+      try { setProfile(await api<DriverProfile>(session, "GET", "/api/driver/profile")); }
+      catch (e) { say((e as Error).message, true); }
+    }
+  }
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const say = useCallback((msg: string, err = false) => {
@@ -114,6 +130,7 @@ function Main() {
     try {
       const st = await api<DriverState>(session, "POST", "/api/driver/shift/start", { vehicle_id: vehicleId });
       await startTracking();
+      setCheckLater(false);
       setState(st);
       say(p.background ? `Shift started in ${st.vehicle?.code}. You can lock the phone.` : `Shift started. Allow location "all the time" so tracking continues when the phone is locked.`, !p.background);
     } catch (e) {
@@ -148,29 +165,48 @@ function Main() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: c.bg }} edges={["top", "bottom"]}>
       <StatusBar style="auto" />
-      {!session ? (
-        <LoginScreen onSignedIn={(s) => { setSession(s); refresh(s); }} />
+      {!session && signupServer != null ? (
+        <SignupScreen server={signupServer} onDone={() => setSignupServer(null)} />
+      ) : !session ? (
+        <LoginScreen onSignedIn={(s) => { setSession(s); refresh(s); }} onSignup={(server) => setSignupServer(server)} />
       ) : (
         <ScrollView
           contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: 48 }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await refresh(session); await flush(); setRefreshing(false); }} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await refresh(session); await flush(); if (view === "stats") await openView("stats"); setRefreshing(false); }} />}
           keyboardShouldPersistTaps="handled"
         >
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
             <Text style={{ color: c.fg, fontSize: 22, fontWeight: "800" }}>Fleetline</Text>
             <Text style={{ color: c.muted }}>{session.user.name}</Text>
           </View>
-          {!state ? (
+          <View style={{ flexDirection: "row", borderWidth: 1.5, borderColor: c.line, borderRadius: 12, overflow: "hidden" }} accessibilityRole="tablist">
+            {(["today", "stats"] as const).map((v) => (
+              <Pressable key={v} onPress={() => openView(v)} accessibilityRole="tab" accessibilityState={{ selected: view === v }}
+                style={{ flex: 1, paddingVertical: 11, alignItems: "center", backgroundColor: view === v ? c.fg : c.panel }}>
+                <Text style={{ color: view === v ? c.bg : c.muted, fontWeight: "700" }}>{v === "today" ? "Today" : "My stats"}</Text>
+              </Pressable>
+            ))}
+          </View>
+          {view === "stats" ? (
+            <StatsScreen profile={profile} />
+          ) : !state ? (
             <Text style={{ color: c.muted }}>Loading…</Text>
           ) : !state.shift ? (
             <ShiftScreen state={state} perms={perms} onStart={startShift} onSignOut={signOut} />
           ) : (
             <>
               <GpsCard gps={gps} perms={perms} onRetry={() => refresh(session)} />
+              {!state.inspection_done && !checkLater ? (
+                <CheckCard state={state} onLater={() => setCheckLater(true)} onSubmit={async (items, notes) => {
+                  const problems = Object.values(items).filter((x) => x === "issue").length;
+                  await act("/api/driver/inspection", { items, notes }, problems ? "Check saved. Dispatch has been told about the problem." : "Check saved. All OK.");
+                }} />
+              ) : null}
               <RouteScreen state={state} fix={gps.fix} act={act} />
               <Button title={endArmed ? "Tap again to end shift" : `End shift in ${state.vehicle?.code ?? ""}`} kind={endArmed ? "armed" : "danger"} onPress={endShift} />
             </>
           )}
+          {state ? <ChangePassword session={session} onChanged={(s) => { setSession(s); say("Password changed. Other devices have been signed out."); }} /> : null}
         </ScrollView>
       )}
       {toast ? (

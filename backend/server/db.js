@@ -112,6 +112,46 @@ CREATE TABLE IF NOT EXISTS alerts (
 CREATE INDEX IF NOT EXISTS idx_alerts_time ON alerts(created_at);
 `);
 
+// Migrations for databases created by earlier versions.
+const cols = (table) => db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+const addColumn = (table, name, def) => { if (!cols(table).includes(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${def}`); };
+// Bumped on every password change so tokens issued before it stop working.
+addColumn("users", "token_version", "INTEGER NOT NULL DEFAULT 0");
+// Self sign-ups start as 'pending' until an admin approves them.
+addColumn("users", "approval", "TEXT NOT NULL DEFAULT 'approved'");
+addColumn("users", "license_no", "TEXT");
+addColumn("users", "signup_note", "TEXT");
+// Odometer grows with GPS distance; service due = last_service_km + service_interval_km.
+addColumn("vehicles", "odometer_km", "REAL NOT NULL DEFAULT 0");
+addColumn("vehicles", "last_service_km", "REAL NOT NULL DEFAULT 0");
+addColumn("vehicles", "last_service_at", "INTEGER");
+addColumn("vehicles", "service_interval_km", "INTEGER NOT NULL DEFAULT 10000");
+// The driver who ran a route (set when it starts), for per-driver stats.
+addColumn("routes", "driver_id", "INTEGER REFERENCES users(id)");
+db.exec(`
+CREATE TABLE IF NOT EXISTS inspections (
+  id INTEGER PRIMARY KEY,
+  vehicle_id INTEGER NOT NULL REFERENCES vehicles(id),
+  driver_id INTEGER REFERENCES users(id),
+  shift_id INTEGER REFERENCES shifts(id),
+  items TEXT NOT NULL,
+  issues INTEGER NOT NULL DEFAULT 0,
+  notes TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_inspections_vehicle ON inspections(vehicle_id, created_at);
+CREATE TABLE IF NOT EXISTS services (
+  id INTEGER PRIMARY KEY,
+  vehicle_id INTEGER NOT NULL REFERENCES vehicles(id),
+  user_id INTEGER REFERENCES users(id),
+  odometer_km REAL NOT NULL,
+  note TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_routes_driver ON routes(driver_id, completed_at);
+CREATE INDEX IF NOT EXISTS idx_positions_driver_time ON positions(driver_id, recorded_at);
+`);
+
 export const one = (sql, ...p) => db.prepare(sql).get(...p);
 export const all = (sql, ...p) => db.prepare(sql).all(...p);
 export const run = (sql, ...p) => db.prepare(sql).run(...p);

@@ -51,6 +51,9 @@ async function doFlush() {
         // The shift was ended (by the driver on another device or by an admin): stop tracking.
         await clearQueue();
         await stopTracking();
+      } else if (e instanceof ApiError && e.status === 401) {
+        // Signed out remotely (e.g. an admin reset the password): stop until the driver signs in again.
+        await stopTracking();
       }
       return; // offline or server error: keep the queue and retry on the next fix
     }
