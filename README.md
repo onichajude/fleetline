@@ -40,6 +40,11 @@ flowchart LR
 
 Requires Node.js 22.13+ (24 recommended).
 
+**On Windows:** double-click `start-local.cmd`. It installs packages and demo data on first run, starts the server,
+optionally starts simulated drivers and a public https link for your phone, and opens the console.
+
+**Any OS:**
+
 ```bash
 cd backend
 ```

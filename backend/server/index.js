@@ -20,7 +20,7 @@ app.set("trust proxy", "loopback, linklocal, uniquelocal");
 app.disable("x-powered-by");
 app.use(express.json({ limit: "1mb" }));
 app.use((req, res, next) => {
-  res.set({ "X-Content-Type-Options": "nosniff", "Referrer-Policy": "same-origin", "X-Frame-Options": "DENY" });
+  res.set({ "X-Content-Type-Options": "nosniff", "Referrer-Policy": "strict-origin-when-cross-origin", "X-Frame-Options": "DENY" });
   next();
 });
 

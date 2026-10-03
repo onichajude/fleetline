@@ -75,7 +75,7 @@ locked, use the native app in [`../mobile`](../mobile), which uses the same API.
 See [.env.example](.env.example). Before production:
 
 - Set `JWT_SECRET` and change all seeded passwords (or start from an empty database and create accounts).
-- Switch `TILE_URL` to a commercial tile provider. The OpenStreetMap servers don't allow heavy production use.
+- Switch `TILE_URL` to a paid tile provider. The default Esri street map needs no key but is meant for testing, and OpenStreetMap's own tile servers block app traffic.
 - Run your own OSRM server (or another routing API) instead of the public demo at `router.project-osrm.org`.
 - Tell drivers what is tracked and when (shift-only), and follow your local employee-monitoring rules.
 

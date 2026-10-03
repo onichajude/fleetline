@@ -30,8 +30,11 @@ api.post("/auth/login", h(async (req, res) => {
 }));
 api.get("/me", requireAuth(), (req, res) => res.json(req.user));
 api.get("/config", (req, res) => res.json({
-  tileUrl: process.env.TILE_URL || "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-  tileAttribution: process.env.TILE_ATTRIBUTION || '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  // Esri World Street Map works without an API key for testing. OpenStreetMap's own tile servers
+  // block app traffic and CARTO now requires a key. Use a keyed provider in production.
+  tileUrl: process.env.TILE_URL || "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+  tileAttribution: process.env.TILE_ATTRIBUTION ||
+    'Tiles &copy; <a href="https://www.esri.com">Esri</a> &mdash; Esri, HERE, Garmin, &copy; OpenStreetMap contributors, and the GIS User Community',
   geofenceM: F.CFG.geofenceM, lateGraceMin: F.CFG.lateGraceMin, offlineMin: F.CFG.offlineMin,
 }));
 

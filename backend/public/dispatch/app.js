@@ -1,4 +1,4 @@
-import { createClient, esc, hm, ago, haversine, localDate } from "/shared/client.js";
+import { createClient, esc, hm, ago, haversine, localDate, tileLayer } from "/shared/client.js";
 
 const client = createClient("fleetline.dispatch");
 const $ = (s) => document.querySelector(s);
@@ -105,7 +105,7 @@ let map, vehLayer, placeLayer, routeLayer, trackLine, draftPin;
 const markers = new Map(), placeMarkers = new Map();
 function initMap() {
   map = L.map("map", { zoomControl: true, attributionControl: true });
-  L.tileLayer(S.config.tileUrl, { attribution: S.config.tileAttribution, maxZoom: 19 }).addTo(map);
+  tileLayer(S.config.tileUrl, { attribution: S.config.tileAttribution, maxZoom: 19 }).addTo(map);
   placeLayer = L.layerGroup().addTo(map);
   routeLayer = L.layerGroup().addTo(map);
   trackLine = L.polyline([], { color: "#2c68bd", weight: 3, opacity: 0.55 }).addTo(map);

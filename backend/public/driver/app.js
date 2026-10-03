@@ -1,4 +1,4 @@
-import { createClient, esc, hm, ago, haversine } from "/shared/client.js";
+import { createClient, esc, hm, ago, haversine, tileLayer } from "/shared/client.js";
 
 const client = createClient("fleetline.driver");
 const root = document.getElementById("root");
@@ -220,7 +220,7 @@ function drawMini() {
   if (!window.L) return;
   if (!mini) {
     mini = L.map("minimap", { zoomControl: false, attributionControl: true });
-    fetch("/api/config").then((r) => r.json()).then((c) => L.tileLayer(c.tileUrl, { attribution: c.tileAttribution, maxZoom: 19 }).addTo(mini));
+    fetch("/api/config").then((r) => r.json()).then((c) => tileLayer(c.tileUrl, { attribution: c.tileAttribution, maxZoom: 19 }).addTo(mini));
     routeLayer = L.layerGroup().addTo(mini);
     mini.setView([G.last?.lat ?? 0, G.last?.lng ?? 0], G.last ? 15 : 2);
   }

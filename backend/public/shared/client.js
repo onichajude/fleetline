@@ -54,3 +54,16 @@ export function haversine(a, b) {
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
 }
 export const localDate = (t = Date.now()) => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+
+/** Leaflet tile layer that retries failed tiles (up to 3 times), so a flaky connection doesn't leave blank squares. */
+export function tileLayer(url, opts) {
+  const layer = window.L.tileLayer(url, opts);
+  layer.on("tileerror", ({ tile }) => {
+    const n = Number(tile.dataset.retry || 0);
+    if (n >= 3) return;
+    tile.dataset.retry = String(n + 1);
+    const base = tile.src.replace(/[?&]_r=\d+$/, "");
+    setTimeout(() => { tile.src = `${base}${base.includes("?") ? "&" : "?"}_r=${n + 1}`; }, 800 * (n + 1));
+  });
+  return layer;
+}
