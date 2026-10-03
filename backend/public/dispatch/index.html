@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fleetline Dispatch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3E%3Crect width='30' height='30' rx='7' fill='%2317202b'/%3E%3Cpath d='M7 20 L13 10 L17 16 L23 8' stroke='%23e0601a' stroke-width='3' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+</head>
+<body>
+<div class="login" id="login" hidden>
+  <form id="loginForm">
+    <h1>Fleetline <span class="muted">Dispatch</span></h1>
+    <p class="muted" style="margin:0">Sign in to the dispatch console.</p>
+    <label>Username<input id="lu" autocomplete="username" required></label>
+    <label>Password<input id="lp" type="password" autocomplete="current-password" required></label>
+    <div class="err" id="lerr"></div>
+    <button class="btn primary" type="submit">Sign in</button>
+    <p class="muted" style="margin:0;font-size:12px">Drivers: use the <a href="/driver/">driver app</a>.</p>
+  </form>
+</div>
+
+<div class="app" id="app" hidden>
+  <header class="top">
+    <div class="brand">
+      <svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><rect width="30" height="30" rx="7" fill="var(--fg)"/><path d="M7 20 L13 10 L17 16 L23 8" stroke="var(--accent)" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="23" cy="8" r="2.6" fill="var(--bg)"/></svg>
+      <h1>Fleetline <span>Dispatch</span></h1>
+    </div>
+    <div class="clock"><div class="time" id="clock">--:--</div><div class="date" id="date"></div></div>
+    <span class="live" id="live"><i></i><span>Connecting</span></span>
+    <dl class="kpis" id="kpis"></dl>
+    <div class="who"><span id="who"></span><button class="btn sm" id="logout">Sign out</button></div>
+  </header>
+
+  <aside class="fleet card" aria-label="Fleet">
+    <div class="fleet-head">
+      <h2 class="h2">Fleet</h2>
+      <input class="search" id="q" type="search" placeholder="Search vehicle, plate or driver" aria-label="Search vehicle, plate or driver">
+      <div class="chips" id="chips"></div>
+    </div>
+    <div class="vlist" id="vlist"></div>
+  </aside>
+
+  <main class="mapwrap card">
+    <div id="map" aria-label="Live fleet map"></div>
+    <div class="banner" id="banner" hidden></div>
+    <div class="legend" id="legend"></div>
+  </main>
+
+  <section class="side card" aria-label="Inspector">
+    <div class="tabs" role="tablist" id="tabs">
+      <button role="tab" data-tab="vehicle" aria-selected="true">Vehicle</button>
+      <button role="tab" data-tab="routes" aria-selected="false">Routes</button>
+      <button role="tab" data-tab="analytics" aria-selected="false">Analytics</button>
+      <button role="tab" data-tab="alerts" aria-selected="false">Alerts<span class="cnt" id="acnt" hidden></span></button>
+      <button role="tab" data-tab="setup" aria-selected="false">Setup</button>
+    </div>
+    <div class="panel" id="panel"></div>
+  </section>
+</div>
+<div class="toast" id="toast" hidden role="status"></div>
+
+<script src="/vendor/leaflet/leaflet.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

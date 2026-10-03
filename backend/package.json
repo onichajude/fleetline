@@ -1,0 +1,22 @@
+{
+  "name": "fleetline",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fleet management: live GPS tracking, route management, driver app and analytics",
+  "type": "module",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning server/index.js",
+    "dev": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning --watch server/index.js",
+    "seed": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning server/seed.js",
+    "simulate": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning scripts/simulate.js",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js",
+    "check": "node --check server/index.js && node --check public/dispatch/app.js && node --check public/driver/app.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "leaflet": "^1.9.4",
+    "socket.io": "^4.8.1"
+  }
+}

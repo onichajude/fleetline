@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Backend runtime data (SQLite database, generated JWT secret)
+backend/data/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.p8
+*.p12
+*.key
+*.jks
+*.mobileprovision
+
+# Expo / React Native
+mobile/.expo/
+mobile/dist/
+mobile/web-build/
+mobile/ios/
+mobile/android/
+mobile/expo-env.d.ts
+*.apk
+*.aab
+*.ipa
+
+# Tooling
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.*
+.vscode/
+.idea/
+*.tsbuildinfo
