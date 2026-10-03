@@ -4,3 +4,4 @@
 *.ico binary
 *.cmd text eol=crlf
 *.bat text eol=crlf
+*.txt text eol=crlf
