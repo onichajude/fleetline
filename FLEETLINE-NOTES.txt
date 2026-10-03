@@ -10,7 +10,7 @@ committed to git stays in its history, even after you delete it.
 --------------
 
 Dispatch console (computer)          Username     Password
-  Admin (can add drivers/vehicles)   admin        dispatch123
+  Admin (sees everything)            admin        dispatch123   <- use this one
   Dispatcher                         dispatch     dispatch123
 
 Driver app (phone or browser)        Username     Password      Usual vehicle
@@ -23,7 +23,12 @@ Driver app (phone or browser)        Username     Password      Usual vehicle
   Andre Boateng                      andre        driver123     VAN-203
   Kasia Nowak                        kasia        driver123     VAN-204
 
-The simulator drives dana, priya, sam and mei. Use tom to test with your own phone.
+Admin can do everything a dispatcher can, plus: approve new driver sign-ups (Team tab),
+add drivers and vehicles, and reset passwords (Setup tab).
+
+The simulator drives dana, priya, sam and mei, so these vehicles move on the map:
+TRK-101, TRK-103, VAN-201 and VAN-202. Use tom (TRK-104) to test with your own phone,
+or tap "New driver? Request an account" in the driver app to test sign-up.
 
 
 2. ADDRESSES (while Fleetline is running on your computer)
@@ -35,6 +40,9 @@ Phone link:         a new https://xxxx.trycloudflare.com address each time you s
                     the launcher with "Y" for the phone link. Add /driver/ on the phone.
 GitHub repository:  https://github.com/onichajude/fleetline  (private)
 
+The localhost addresses only work on the computer running Fleetline. They stop working
+when you close the "Fleetline server" window or the computer sleeps.
+
 
 3. START AND STOP
 -----------------
@@ -42,7 +50,13 @@ GitHub repository:  https://github.com/onichajude/fleetline  (private)
 Start:  double-click start-local.cmd in the fleetline folder.
         - "Run simulated drivers?"           Y = demo vehicles drive around the map
         - "Create a public https link?"      Y = link for your phone (needed for GPS on phones)
+        You get these windows on the taskbar:
+          "Fleetline server"              the app itself - keep it open
+          "Fleetline simulated drivers"   moves the demo vehicles (only if you said Y)
+          "Fleetline phone link"          the https link for phones (only if you said Y)
+        Then the dispatch console opens in your browser.
 Stop:   close the windows whose titles start with "Fleetline".
+Only run one copy: if a "Fleetline server" window is already open, use that one.
 
 After code changes: close all "Fleetline" windows, start the launcher again,
 then press Ctrl+F5 in the browser.
@@ -117,20 +131,57 @@ Changing or resetting a password signs that person out on every other device.
 A driver who is reset while on shift stops sending GPS until they sign in again.
 
 
-9. NEW DRIVERS (SIGN-UP AND APPROVAL)
--------------------------------------
+9. CREATING DRIVERS AND SIGNING IN
+----------------------------------
 
-Drivers can sign themselves up:
-  Driver app / phone app -> "New driver? Request an account"
-  They enter name, phone, licence number (optional), truck or van, username, password.
-  They can't sign in until an admin approves them.
+CREATE A NEW DRIVER - Option A: the admin creates it (quickest)
+  1. Open http://localhost:4000 and sign in as admin / dispatch123.
+  2. Open the Setup tab and scroll to Drivers.
+  3. Fill in:
+       - Full name and phone
+       - Username, e.g. john
+       - Password, at least 8 characters
+       - Licence number (optional)
+       - Assign vehicle: pick their truck or van
+  4. Click "Add driver".
+  5. Give the driver their username and password. They can sign in right away.
 
-To approve (admins only):
-  Dispatch console -> Team tab (a red number shows waiting sign-ups)
-  -> pick the truck or van to assign -> Approve   (or Decline)
+CREATE A NEW DRIVER - Option B: the driver signs up
+  1. The driver opens http://localhost:4000/driver/ and taps
+     "New driver? Request an account".
+  2. They enter name, phone, licence number (optional), truck or van, and choose a
+     username and password, then tap "Send request".
+     They can't sign in yet: they see "Your account is waiting for approval".
+  3. In the console, open the Team tab (a red number shows waiting sign-ups).
+     Pick their truck or van and click "Approve" (or "Decline").
+  4. They can now sign in with the username and password they chose.
 
-Admins can also add a driver directly: Setup tab -> Drivers -> Add driver
-(with an optional licence number and vehicle).
+SIGN IN AS AN EXISTING DRIVER
+  1. Open http://localhost:4000/driver/
+  2. Enter the driver's username and password.
+     Demo drivers: dana, luis, priya, tom, sam, mei, andre, kasia - password driver123
+  3. After signing in:
+       "Today"    - start a shift, do the pre-trip check, see the route
+       "My stats" - their profile: rank, this week vs their average,
+                    recent trips, vehicle condition
+
+SWITCH TO ANOTHER DRIVER
+  Tap "Sign out" (on the start-shift screen), then sign in with the other username.
+  If the driver is on a shift, tap "End shift" first.
+
+VIEW ANY DRIVER'S PROFILE AS ADMIN (no driver password needed)
+  Console -> Team tab -> click the driver's name in the ranking,
+  or Setup tab -> Drivers -> click their name.
+
+DRIVER FORGOT THEIR PASSWORD
+  Setup tab -> Drivers -> "Reset password" next to their name -> set a new one
+  and tell the driver.
+
+TIPS
+  - The browser remembers who is signed in. To test as several drivers at once,
+    use a different browser or a private/incognito window for each.
+  - The simulator is driving Dana, Priya, Sam and Mei. Use Tom, or a driver you
+    create, for your own testing.
 
 
 10. DRIVER PERFORMANCE AND VEHICLE CONDITION
