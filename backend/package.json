@@ -4,14 +4,17 @@
   "private": true,
   "description": "Fleet management: live GPS tracking, route management, driver app and analytics",
   "type": "module",
-  "engines": { "node": ">=22.13" },
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
     "start": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning server/index.js",
     "dev": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning --watch server/index.js",
     "seed": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning server/seed.js",
     "simulate": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning scripts/simulate.js",
     "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js",
-    "check": "node --check server/index.js && node --check server/stats.js && node --check server/seed.js && node --check public/dispatch/app.js && node --check public/dispatch/team.js && node --check public/driver/app.js && node --check public/driver/extras.js"
+    "check": "node --check server/index.js && node --check server/stats.js && node --check server/seed.js && node --check public/dispatch/app.js && node --check public/dispatch/team.js && node --check public/driver/app.js && node --check public/driver/extras.js && node --check server/security.js && node --check server/maintenance.js && node --check scripts/backup.js",
+    "backup": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning scripts/backup.js"
   },
   "dependencies": {
     "express": "^4.21.2",

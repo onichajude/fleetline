@@ -90,6 +90,7 @@ export function statsHtml(p) {
       <span>Last check</span><b>${c.last_inspection ? `${dateOf(c.last_inspection.created_at)}${c.last_inspection.issues.length ? (c.last_inspection.issues_open ? " · problems reported" : " · problem since fixed") : " · all OK"}` : "none yet"}</b></div>
       ${c.reasons.length ? `<ul class="reasons">${c.reasons.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}</div>`;
   } else h += `<div class="card"><p class="muted" style="margin:0">No vehicle assigned yet.</p></div>`;
+  h += `<h2>Your data</h2><div class="card" style="display:flex;flex-direction:column;gap:8px"><p class="muted" style="margin:0;font-size:14px">Download everything Fleetline stores about you: profile, shifts, location history, checks and trips.</p><button class="btn" data-act="mydata">Download my data</button></div>`;
   h += `<h2>Recent trips · ${fmt(p.totals.trips)} total</h2><div class="card" style="padding:4px 16px">${p.recentTrips.length ? `<ol class="stops">${p.recentTrips.map((t) => `<li style="--c:${t.status === "cancelled" ? "var(--idle)" : "var(--ok)"}"><span class="n">✓</span><span class="nm">${esc(t.code)} · ${dateOf(t.completed_at)}</span><span class="st">${t.onTimePct == null ? "" : t.onTimePct + "% on time"}</span><span class="tm">${t.delivered}/${t.total} delivered${t.vehicle_code ? " · " + esc(t.vehicle_code) : ""}</span></li>`).join("")}</ol>` : `<p class="muted">Your finished trips appear here.</p>`}</div>`;
   return h;
 }

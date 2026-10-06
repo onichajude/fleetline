@@ -5,11 +5,12 @@ import { Button, Card, Notice } from "../ui";
 import { mono, useTheme } from "../theme";
 import type { PermissionResult } from "../tracking";
 
-export function ShiftScreen({ state, onStart, onSignOut, perms }: {
+export function ShiftScreen({ state, onStart, onSignOut, perms, onAcceptPrivacy }: {
   state: DriverState;
   onStart: (vehicleId: number) => Promise<void>;
   onSignOut: () => void;
   perms: PermissionResult | null;
+  onAcceptPrivacy: (version: string) => Promise<void>;
 }) {
   const c = useTheme();
   const [picked, setPicked] = useState<number | null>(null);
@@ -18,6 +19,27 @@ export function ShiftScreen({ state, onStart, onSignOut, perms }: {
   useEffect(() => {
     if (picked == null && state.vehicles.length) setPicked((state.vehicles.find((v) => v.mine) || state.vehicles[0]).id);
   }, [state.vehicles, picked]);
+
+  if (state.privacy?.required) {
+    const n = state.privacy.notice;
+    return (
+      <View style={{ gap: 14 }}>
+        <Card>
+          <Text style={{ color: c.fg, fontSize: 26, fontWeight: "700" }} accessibilityRole="header">{n.title}</Text>
+          {n.points.map((p) => (
+            <View key={p} style={{ flexDirection: "row", gap: 8 }}>
+              <Text style={{ color: c.accent, fontSize: 16 }}>•</Text>
+              <Text style={{ color: c.fg, fontSize: 15, lineHeight: 21, flex: 1 }}>{p}</Text>
+            </View>
+          ))}
+          <Text style={{ color: c.muted, fontSize: 13 }}>Notice version {n.version}</Text>
+          <Button title="I understand. Continue" kind="primary" busy={busy}
+            onPress={async () => { setBusy(true); try { await onAcceptPrivacy(n.version); } finally { setBusy(false); } }} />
+        </Card>
+        <Button title="Sign out" small onPress={onSignOut} />
+      </View>
+    );
+  }
 
   return (
     <View style={{ gap: 14 }}>

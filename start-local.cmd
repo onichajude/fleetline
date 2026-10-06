@@ -35,7 +35,7 @@ echo Add /driver/ to the end of it on your phone.
 :openbrowser
 start "" http://localhost:4000
 echo.
-echo Dispatch console: http://localhost:4000      (dispatch / dispatch123)
+echo Dispatch console: http://localhost:4000      (admin / dispatch123 - first sign-in asks you to set up two-step sign-in)
 echo Driver app:       http://localhost:4000/driver/  (tom / driver123)
 echo.
 echo To stop Fleetline, close the windows titled "Fleetline ...".

@@ -13,7 +13,7 @@ export function createClient(storageKey) {
     if (res.status === 401 && session) { logout(); throw new Error("Your session expired. Sign in again."); }
     if (res.status === 204) return null;
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw Object.assign(new Error(data.error || `Request failed (${res.status})`), { status: res.status });
+    if (!res.ok) throw Object.assign(new Error(data.error || `Request failed (${res.status})`), { status: res.status, code: data.code, data });
     return data;
   }
   function logout() {
@@ -24,8 +24,8 @@ export function createClient(storageKey) {
   return {
     get session() { return session; },
     onSession(fn) { listeners.add(fn); },
-    async login(username, password, app) {
-      const s = await request("POST", "/api/auth/login", { username, password, app });
+    async login(username, password, app, code) {
+      const s = await request("POST", "/api/auth/login", { username, password, app, ...(code ? { code } : {}) });
       session = s;
       try { localStorage.setItem(storageKey, JSON.stringify(s)); } catch {}
       listeners.forEach((fn) => fn(s));
@@ -39,6 +39,15 @@ export function createClient(storageKey) {
       try { localStorage.setItem(storageKey, JSON.stringify(session)); } catch {}
     },
     get: (u) => request("GET", u),
+    /** Downloads an authenticated JSON endpoint as a file. */
+    async download(url, filename) {
+      const data = await request("GET", url);
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+      a.download = filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    },
     post: (u, b = {}) => request("POST", u, b),
     patch: (u, b = {}) => request("PATCH", u, b),
     del: (u) => request("DELETE", u),

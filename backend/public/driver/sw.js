@@ -1,5 +1,5 @@
 // App-shell cache so the driver app opens without signal. API calls always go to the network.
-const CACHE = "fleetline-driver-v4";
+const CACHE = "fleetline-driver-v5";
 const SHELL = ["/driver/", "/driver/app.js", "/driver/extras.js", "/driver/style.css", "/driver/icon.svg", "/driver/manifest.webmanifest",
   "/shared/client.js", "/vendor/leaflet/leaflet.js", "/vendor/leaflet/leaflet.css"];
 

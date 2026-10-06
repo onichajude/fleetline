@@ -1,51 +1,13 @@
 // End-to-end API test: seeds a throwaway database, starts the real server and walks a full
 // dispatch → driver shift → GPS → geofence arrival → delivery → analytics cycle.
+// Staff two-step sign-in is switched off here; security.test.js covers it.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { startServer } from "./helpers.js";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "fleetline-test-"));
-const PORT = 4400 + Math.floor(Math.random() * 500);
-const BASE = `http://127.0.0.1:${PORT}`;
-const env = { ...process.env, DATA_DIR: dataDir, PORT: String(PORT), ROUTING_URL: "", JWT_SECRET: "test-secret" };
-const nodeArgs = ["--disable-warning=ExperimentalWarning"];
-let server;
-
-async function call(method, url, token, body) {
-  const res = await fetch(BASE + url, {
-    method,
-    headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const data = res.status === 204 ? null : await res.json();
-  return { status: res.status, data };
-}
-const login = async (username, password, app) => (await call("POST", "/api/auth/login", null, { username, password, app })).data.token;
-
-before(async () => {
-  const seed = spawnSync(process.execPath, [...nodeArgs, "server/seed.js"], { cwd: root, env, encoding: "utf8" });
-  assert.equal(seed.status, 0, seed.stderr);
-  server = spawn(process.execPath, [...nodeArgs, "server/index.js"], { cwd: root, env, stdio: ["ignore", "pipe", "pipe"] });
-  await new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error("server did not start")), 15000);
-    server.stdout.on("data", (d) => { if (String(d).includes("Fleetline running")) { clearTimeout(t); resolve(); } });
-    server.on("exit", (code) => reject(new Error(`server exited with ${code}`)));
-  });
-});
-after(async () => {
-  if (server && server.exitCode === null) {
-    const exited = new Promise((r) => server.once("exit", r));
-    server.kill();
-    await exited;
-  }
-  // Windows can hold the SQLite file briefly after the process exits.
-  fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
-});
+let srv, call, login, driverLogin;
+before(async () => { srv = await startServer({ REQUIRE_STAFF_MFA: "false" }); ({ call, login, driverLogin } = srv); });
+after(async () => { await srv?.stop(); });
 
 test("rejects bad credentials and wrong roles", async () => {
   assert.equal((await call("POST", "/api/auth/login", null, { username: "dispatch", password: "nope" })).status, 401);
@@ -57,7 +19,7 @@ test("rejects bad credentials and wrong roles", async () => {
 
 test("full delivery cycle with GPS geofencing", async () => {
   const staff = await login("dispatch", "dispatch123", "dispatch");
-  const driver = await login("tom", "driver123", "driver");
+  const driver = await driverLogin("tom");
 
   const fleet = (await call("GET", "/api/fleet", staff)).data;
   assert.equal(fleet.length, 8);
@@ -175,7 +137,7 @@ test("driver sign-up needs admin approval and gets a vehicle", async () => {
 
 test("pre-trip checks, driver profile, team leaderboard and vehicle service", async () => {
   const admin = await login("admin", "dispatch123", "dispatch");
-  const driver = await login("luis", "driver123", "driver");
+  const driver = await driverLogin("luis");
   const truck = (await call("GET", "/api/fleet", admin)).data.find((v) => v.code === "TRK-102");
   let st = (await call("POST", "/api/driver/shift/start", driver, { vehicle_id: truck.id })).data;
   assert.equal(st.inspection_done, false);

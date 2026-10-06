@@ -204,6 +204,17 @@ function render() {
   const body = document.getElementById("body"), list = document.getElementById("list"), foot = document.getElementById("foot"), mm = document.getElementById("minimap");
   const typing = document.activeElement && ["TEXTAREA", "SELECT"].includes(document.activeElement.tagName) && body.contains(document.activeElement);
 
+  if (!st.shift && st.privacy?.required) {
+    // Location is only collected after the driver has read and accepted the current notice.
+    mm.hidden = true; list.innerHTML = "";
+    const n = st.privacy.notice;
+    body.innerHTML = `<div class="card" style="display:flex;flex-direction:column;gap:12px"><h1>${esc(n.title)}</h1>
+      <ul class="notice">${n.points.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>
+      <p class="muted" style="margin:0;font-size:13px">Notice version ${esc(n.version)}${st.privacy.accepted_version ? `. You accepted an earlier version on ${new Date(st.privacy.accepted_at).toLocaleDateString()}; it has changed.` : "."}</p>
+      <button class="btn primary block" data-act="privacyack" data-v="${esc(n.version)}">I understand. Continue</button></div>`;
+    foot.innerHTML = `<button class="btn sm" data-act="logout">Sign out</button>`;
+    return;
+  }
   if (!st.shift) {
     mm.hidden = true; list.innerHTML = "";
     if (!S.picked && st.vehicles.length) S.picked = (st.vehicles.find((v) => v.mine) || st.vehicles[0]).id;
@@ -335,6 +346,10 @@ async function onClick(e) {
   }
   if (act === "chk") { S.check.items[b.dataset.k] = b.dataset.v; document.getElementById("check").innerHTML = ""; return renderCheck(); }
   if (act === "chklater") { S.check.later = true; return renderCheck(); }
+  if (act === "mydata") {
+    try { await client.download("/api/driver/my-data", "fleetline-my-data.json"); toast("Your data was downloaded."); } catch (err) { toast(err.message, true); }
+    return;
+  }
   if (act === "armskip") { S.armed = "skip" + id; S.skipReason = ""; return render(); }
   if (act === "unarm") { S.armed = null; return render(); }
   if (act === "dismissgap") { G.gapWarn = false; return updateGps(); }
@@ -349,6 +364,8 @@ async function onClick(e) {
       await askLocation();
       S.state = await client.post("/api/driver/shift/start", { vehicle_id: S.picked });
       startGps(); toast(`Shift started in ${S.state.vehicle.code}. Keep this app open while driving.`);
+    } else if (act === "privacyack") {
+      S.state = await client.post("/api/driver/privacy-ack", { version: b.dataset.v });
     } else if (act === "chksubmit") {
       S.state = await client.post("/api/driver/inspection", { items: S.check.items, notes: S.check.notes });
       const problems = Object.values(S.check.items).filter((x) => x === "issue").length;

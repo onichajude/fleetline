@@ -18,9 +18,28 @@
     <p class="muted" style="margin:0">Sign in to the dispatch console.</p>
     <label>Username<input id="lu" autocomplete="username" required></label>
     <label>Password<input id="lp" type="password" autocomplete="current-password" required></label>
+    <label id="lcodeWrap" hidden>6-digit code from your authenticator app<input id="lcode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="\d{6}"></label>
     <div class="err" id="lerr"></div>
     <button class="btn primary" type="submit">Sign in</button>
     <p class="muted" style="margin:0;font-size:12px">Drivers: use the <a href="/driver/">driver app</a>.</p>
+  </form>
+</div>
+
+<div class="login" id="mfa" hidden>
+  <form id="mfaForm">
+    <h1>Set up two-step sign-in</h1>
+    <p class="muted" style="margin:0">Staff accounts can see every driver's location, so they need a second step at sign-in.</p>
+    <ol class="mfa-steps">
+      <li>Install an authenticator app on your phone, such as Google Authenticator, Microsoft Authenticator or 1Password.</li>
+      <li>In the app, add an account and choose <b>Enter a setup key</b>. Use this key (time-based):
+        <code id="mfaSecret" class="mfa-key">…</code>
+        <span class="muted">On a phone you can tap <a id="mfaLink" href="#">this link</a> instead.</span></li>
+      <li>Enter the 6-digit code the app shows.</li>
+    </ol>
+    <label>6-digit code<input id="mfaCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="\d{6}" required></label>
+    <div class="err" id="mfaErr"></div>
+    <button class="btn primary" type="submit">Turn on two-step sign-in</button>
+    <button class="btn" type="button" id="mfaCancel">Sign out</button>
   </form>
 </div>
 

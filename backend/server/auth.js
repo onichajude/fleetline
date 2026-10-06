@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import jwt from "jsonwebtoken";
 import { DATA_DIR, one } from "./db.js";
+import { staffMfaRequired } from "./security.js";
 
 function loadSecret() {
   if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
@@ -42,23 +43,31 @@ export function passwordProblem(pw, username = "") {
 export function userFromToken(token) {
   try {
     const p = jwt.verify(token, SECRET);
-    const u = one("SELECT id, name, username, role, phone, active, token_version FROM users WHERE id = ?", p.sub);
-    if (!u || !u.active || (p.ver ?? 0) !== u.token_version) return null;
-    delete u.token_version;
+    const u = one("SELECT id, name, username, role, phone, active, approval, token_version, mfa_enabled FROM users WHERE id = ?", p.sub);
+    if (!u || !u.active || u.approval !== "approved" || (p.ver ?? 0) !== u.token_version) return null;
+    delete u.token_version; delete u.approval;
+    u.mfa_enabled = !!u.mfa_enabled;
     return u;
   } catch { return null; }
 }
 
-export function requireAuth(...roles) {
+function authenticate(roles, { allowWithoutMfa = false } = {}) {
   return (req, res, next) => {
     const h = req.headers.authorization || "";
     const user = userFromToken(h.startsWith("Bearer ") ? h.slice(7) : "");
     if (!user) return res.status(401).json({ error: "Sign in again: your session has expired." });
     if (roles.length && !roles.includes(user.role)) return res.status(403).json({ error: "Your account can't do that." });
+    // Privileged accounts must use an authenticator app before they can do anything else.
+    if (!allowWithoutMfa && user.role !== "driver" && !user.mfa_enabled && staffMfaRequired()) {
+      return res.status(403).json({ error: "Set up two-step sign-in to continue.", code: "mfa_setup_required" });
+    }
     req.user = user;
     next();
   };
 }
+export const requireAuth = (...roles) => authenticate(roles);
+/** For the few endpoints a staff member needs in order to set up two-step sign-in. */
+export const requireAuthAllowNoMfa = (...roles) => authenticate(roles, { allowWithoutMfa: true });
 
 // Simple in-memory login throttle: 8 failures per username+IP per 10 minutes.
 const fails = new Map();

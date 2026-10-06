@@ -27,17 +27,17 @@ async function call(token, method, path, body) {
 async function pickDrivers() {
   const list = arg("drivers");
   if (list) return list.split(",").map((s) => s.trim()).filter(Boolean);
-  // Default: sign in as staff to find vehicles with dispatched/active routes and their usual drivers.
-  const staff = await call(null, "POST", "/api/auth/login", { username: "dispatch", password: process.env.SEED_STAFF_PASSWORD || "dispatch123" });
-  const [fleet, drivers] = await Promise.all([call(staff.token, "GET", "/api/fleet"), call(staff.token, "GET", "/api/drivers")]);
-  const ids = fleet.filter((v) => v.route && v.default_driver_id).map((v) => v.driver?.id || v.default_driver_id);
-  return drivers.filter((d) => ids.includes(d.id)).map((d) => d.username);
+  // The demo seed dispatches routes to these drivers' vehicles (TRK-101, TRK-103, VAN-201, VAN-202).
+  // (Staff sign-in needs an authenticator code, so the simulator doesn't look them up.)
+  return ["dana", "priya", "sam", "mei"];
 }
 
 async function runDriver(username, idx) {
   const log = (...m) => console.log(`[${username}]`, ...m);
   const { token } = await call(null, "POST", "/api/auth/login", { username, password: PASSWORD, app: "driver" });
   let st = await call(token, "GET", "/api/driver/state");
+  // Simulated test drivers accept the location notice; real drivers do this themselves in the app.
+  if (st.privacy?.required) st = await call(token, "POST", "/api/driver/privacy-ack", { version: st.privacy.notice.version });
   if (!st.shift) {
     const v = st.vehicles.find((x) => x.mine) || st.vehicles[0];
     if (!v) return log("no free vehicle");

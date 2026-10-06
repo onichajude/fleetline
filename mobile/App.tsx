@@ -192,7 +192,8 @@ function Main() {
           ) : !state ? (
             <Text style={{ color: c.muted }}>Loading…</Text>
           ) : !state.shift ? (
-            <ShiftScreen state={state} perms={perms} onStart={startShift} onSignOut={signOut} />
+            <ShiftScreen state={state} perms={perms} onStart={startShift} onSignOut={signOut}
+              onAcceptPrivacy={(version) => act("/api/driver/privacy-ack", { version })} />
           ) : (
             <>
               <GpsCard gps={gps} perms={perms} onRetry={() => refresh(session)} />

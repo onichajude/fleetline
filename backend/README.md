@@ -87,6 +87,8 @@ server/
   api.js       REST endpoints (auth, fleet, routes, places, drivers, driver app, analytics)
   fleet.js     Live vehicle state, GPS intake, geofencing, alerts, route lifecycle, analytics
   stats.js     Driver and vehicle performance, weekly rankings, vehicle condition
+  security.js  Two-step sign-in (TOTP), audit log, driver privacy notice
+  maintenance.js  Retention purge, backups and backup verification
   db.js        SQLite schema (node:sqlite)
   auth.js      Password hashing (scrypt), JWT sessions, login throttling
   geo.js       Distance, stop-order optimisation, OSRM road routing
@@ -121,6 +123,13 @@ All endpoints take and return JSON. Send `Authorization: Bearer <token>` from `P
 | POST | `/api/vehicles/:id/service` | staff | Record a service (`{note}`) at the current odometer |
 | GET | `/api/driver/profile` | driver | The signed-in driver's own performance page |
 | POST | `/api/driver/inspection` | driver | Pre-trip check `{items: {tires: "ok"\|"issue", ...}, notes}` |
+| POST | `/api/me/mfa/setup` · `/enable` · `/disable` | any | Two-step sign-in (TOTP); required for staff unless `REQUIRE_STAFF_MFA=false` |
+| POST | `/api/users` · PATCH `/api/users/:id` | admin | Create dispatcher/admin accounts; deactivate |
+| POST | `/api/users/:id/mfa-reset` | admin | Reset someone's two-step sign-in (lost phone) |
+| GET | `/api/audit?limit=&before=&action=` | admin | Audit log |
+| GET | `/api/drivers/:id/export` · POST `/api/drivers/:id/erase` | admin | Privacy requests: export, erase (`{confirm_username}`) |
+| GET | `/api/driver/my-data` · POST `/api/driver/privacy-ack` | driver | Own data download; accept the privacy notice (`{version}`) |
+| GET | `/api/health`, `/api/privacy-notice` | public | Health check; current privacy notice |
 | GET | `/api/alerts`, POST `/api/alerts/:id/ack` | staff | Alert feed |
 | GET | `/api/analytics?date=YYYY-MM-DD` | staff | Distance, driving time, on-time rate, deliveries by hour, routes |
 | GET | `/api/driver/state` | driver | Shift, vehicle and current route |

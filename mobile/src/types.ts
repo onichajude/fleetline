@@ -31,8 +31,12 @@ export type Route = {
 
 export type Vehicle = { id: number; code: string; type: string; plate: string | null; mine?: number | boolean };
 
+export type PrivacyNotice = { version: string; title: string; points: string[] };
+
 export type DriverState = {
   user: User;
+  /** The driver must accept the current notice before a shift (and location sharing) can start. */
+  privacy: { required: boolean; accepted_version: string | null; accepted_at: number | null; notice: PrivacyNotice };
   shift: { id: number; vehicle_id: number; started_at: number } | null;
   vehicle: Vehicle | null;
   vehicles: Vehicle[];

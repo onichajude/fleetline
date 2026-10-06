@@ -150,7 +150,34 @@ CREATE TABLE IF NOT EXISTS services (
 );
 CREATE INDEX IF NOT EXISTS idx_routes_driver ON routes(driver_id, completed_at);
 CREATE INDEX IF NOT EXISTS idx_positions_driver_time ON positions(driver_id, recorded_at);
+CREATE TABLE IF NOT EXISTS audit_log (
+  id INTEGER PRIMARY KEY,
+  at INTEGER NOT NULL,
+  actor_id INTEGER,
+  actor_username TEXT,
+  action TEXT NOT NULL,
+  target_type TEXT,
+  target_id TEXT,
+  details TEXT,
+  ip TEXT,
+  request_id TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_log(at);
 `);
+// Authenticator-app sign-in for staff; mfa_last_step blocks reuse of a code.
+addColumn("users", "mfa_secret", "TEXT");
+addColumn("users", "mfa_enabled", "INTEGER NOT NULL DEFAULT 0");
+addColumn("users", "mfa_last_step", "INTEGER");
+// Which version of the driver privacy notice was accepted, and when.
+addColumn("users", "privacy_ack_version", "TEXT");
+addColumn("users", "privacy_ack_at", "INTEGER");
+// Set when a driver's personal data has been erased.
+addColumn("users", "erased_at", "INTEGER");
+// A re-sent GPS batch (e.g. after a lost response) must not create duplicate fixes.
+if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'uq_positions_vehicle_time'").get()) {
+  db.exec(`DELETE FROM positions WHERE id NOT IN (SELECT MIN(id) FROM positions GROUP BY vehicle_id, recorded_at);
+           CREATE UNIQUE INDEX uq_positions_vehicle_time ON positions(vehicle_id, recorded_at);`);
+}
 
 export const one = (sql, ...p) => db.prepare(sql).get(...p);
 export const all = (sql, ...p) => db.prepare(sql).all(...p);

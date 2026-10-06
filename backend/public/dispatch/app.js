@@ -37,14 +37,40 @@ function showLogin(err) {
 $("#loginForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   $("#lerr").textContent = "";
-  try { await client.login($("#lu").value.trim(), $("#lp").value, "dispatch"); $("#login").hidden = true; await boot(); }
-  catch (err) { $("#lerr").textContent = err.message; }
+  try { await client.login($("#lu").value.trim(), $("#lp").value, "dispatch", $("#lcode").value.trim()); $("#login").hidden = true; await boot(); }
+  catch (err) {
+    $("#lerr").textContent = err.message;
+    // Accounts with two-step sign-in need the code from the authenticator app.
+    if (err.data?.mfa_required) { $("#lcodeWrap").hidden = false; $("#lcode").value = ""; $("#lcode").focus(); }
+  }
 });
 $("#logout").addEventListener("click", () => client.logout());
 
+/** Staff without two-step sign-in must set it up before the console loads any fleet data. */
+async function showMfaSetup() {
+  $("#login").hidden = true; $("#app").hidden = true; $("#mfa").hidden = false;
+  const { secret, otpauth_uri } = await client.post("/api/me/mfa/setup");
+  $("#mfaSecret").textContent = secret.match(/.{1,4}/g).join(" ");
+  $("#mfaLink").href = otpauth_uri;
+  $("#mfaCode").focus();
+}
+$("#mfaForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("#mfaErr").textContent = "";
+  try {
+    const r = await client.post("/api/me/mfa/enable", { code: $("#mfaCode").value.trim() });
+    client.setToken(r.token);
+    $("#mfa").hidden = true;
+    await boot();
+  } catch (err) { $("#mfaErr").textContent = err.message; }
+});
+$("#mfaCancel").addEventListener("click", () => client.logout());
+
 async function boot() {
+  const who = await client.get("/api/me");
+  if (who.mfa_setup_required) return showMfaSetup();
   const [me, config, fleet, routes, places, depots, alerts, drivers] = await Promise.all([
-    client.get("/api/me"), client.get("/api/config"), client.get("/api/fleet"), client.get("/api/routes"), client.get("/api/places"),
+    who, client.get("/api/config"), client.get("/api/fleet"), client.get("/api/routes"), client.get("/api/places"),
     client.get("/api/depots"), client.get("/api/alerts"), client.get("/api/drivers"),
   ]);
   Object.assign(S, { me, config, places, depots, alerts, drivers });
@@ -79,7 +105,7 @@ function connectSocket() {
   const setLive = (on) => { S.connected = on; $("#live").classList.toggle("on", on); $("#live span").textContent = on ? "Live" : "Reconnecting"; };
   socket.on("connect", () => { setLive(true); refreshFleet(); });
   socket.on("disconnect", () => setLive(false));
-  socket.on("connect_error", (e) => { setLive(false); if (e.message === "unauthorized") client.logout(); });
+  socket.on("connect_error", (e) => { setLive(false); if (e.message === "unauthorized") client.logout(); if (e.message === "mfa_setup_required") showMfaSetup(); });
   socket.on("vehicle", (v) => {
     const prev = S.fleet.get(v.id);
     S.fleet.set(v.id, v);
@@ -523,7 +549,8 @@ function setupPanel() {
     <input class="inp" type="password" data-f="pw.current" value="${fv("pw.current")}" placeholder="Current password" aria-label="Current password" autocomplete="current-password">
     <div class="two"><input class="inp" type="password" data-f="pw.new" value="${fv("pw.new")}" placeholder="New password (8+ characters)" aria-label="New password" autocomplete="new-password">
     <input class="inp" type="password" data-f="pw.confirm" value="${fv("pw.confirm")}" placeholder="Repeat new password" aria-label="Repeat new password" autocomplete="new-password"></div>
-    <div><button class="btn sm primary" data-act="pwchange">Change password</button></div></div>`;
+    <div><button class="btn sm primary" data-act="pwchange">Change password</button></div></div>
+    <p class="muted" style="margin:8px 0 0">Two-step sign-in: <b>${S.me.mfa_enabled ? "on" : "off"}</b>${S.me.mfa_enabled ? " (authenticator app)" : ` · <button class="btn link" data-act="mfaon">Turn on</button>`}</p>`;
   h += `<h3>Places</h3>`;
   if (S.placeDraft) {
     h += `<div class="builder form"><b>New place</b>
@@ -544,8 +571,31 @@ function setupPanel() {
   h += `<ul class="list">${S.drivers.map((d) => `<li><span><button class="btn link" data-act="teamdrv" data-id="${d.id}">${esc(d.name)}</button> <span class="muted mono">@${esc(d.username)}${d.usual_vehicle ? " · " + esc(d.usual_vehicle) : ""}</span>${d.active ? "" : ` <span class="muted">(disabled)</span>`}</span><span class="row"><span class="muted">${d.on_shift_vehicle ? "On shift · " + esc(d.on_shift_vehicle) : "Off shift"}</span>${isAdmin ? resetRow(d) : ""}</span></li>`).join("")}</ul>`;
   if (isAdmin) {
     const staff = S.users.filter((u) => u.role !== "driver" && u.id !== S.me.id);
-    h += `<h3>Staff</h3>${staff.length ? `<ul class="list">${staff.map((u) => `<li><span>${esc(u.name)} <span class="muted mono">@${esc(u.username)} · ${esc(u.role)}</span></span>${resetRow(u)}</li>`).join("")}</ul>` : `<p class="muted">No other staff accounts.</p>`}
-      <p class="muted" style="font-size:12px">Resetting a password signs that person out on all their devices. A driver on shift stops sending GPS until they sign in again.</p>`;
+    const admins = S.users.filter((u) => u.role === "admin" && u.active).length;
+    h += `<h3>Staff</h3>
+      ${admins < 2 ? `<div class="cond" style="--c:var(--warn);margin-bottom:8px;font-size:12.5px">Add a second admin. If the only admin loses their authenticator phone, nobody can reset it.</div>` : ""}
+      <div class="form" style="margin-bottom:8px"><div class="two"><input class="inp" data-f="stf.name" placeholder="Full name" value="${fv("stf.name")}" aria-label="Staff name">
+      <select data-f="stf.role" aria-label="Role"><option value="dispatcher" ${S.forms["stf.role"] !== "admin" ? "selected" : ""}>Dispatcher</option><option value="admin" ${S.forms["stf.role"] === "admin" ? "selected" : ""}>Admin</option></select></div>
+      <div class="two"><input class="inp" data-f="stf.username" placeholder="Username" value="${fv("stf.username")}" aria-label="Staff username" autocomplete="off">
+      <input class="inp" type="password" data-f="stf.password" placeholder="Temporary password (8+)" value="${fv("stf.password")}" aria-label="Temporary password" autocomplete="new-password"></div>
+      <div><button class="btn sm primary" data-act="staffadd">Add staff</button></div></div>
+      ${staff.length ? `<ul class="list">${staff.map((u) => `<li><span>${esc(u.name)} <span class="muted mono">@${esc(u.username)} · ${esc(u.role)}</span>${u.active ? "" : ` <span class="muted">(deactivated)</span>`}</span><span class="row">${resetRow(u)}<button class="btn sm ${S.armed === "mfareset" + u.id ? "danger armed" : ""}" data-act="mfareset" data-id="${u.id}">${S.armed === "mfareset" + u.id ? "Confirm" : "Reset two-step"}</button><button class="btn sm ${u.active ? "danger" : ""} ${S.armed === "staffact" + u.id ? "armed" : ""}" data-act="staffact" data-id="${u.id}" data-on="${u.active ? 0 : 1}">${S.armed === "staffact" + u.id ? "Confirm" : u.active ? "Deactivate" : "Reactivate"}</button></span></li>`).join("")}</ul>` : `<p class="muted">No other staff accounts.</p>`}
+      <p class="muted" style="font-size:12px">Resetting a password signs that person out on all their devices. A driver on shift stops sending GPS until they sign in again. Resetting two-step sign-in (lost phone) makes them set it up again at their next sign-in.</p>`;
+
+    // Privacy requests: right of access and erasure for drivers.
+    const sel = S.forms["priv.driver"] || "";
+    const chosen = S.drivers.find((d) => String(d.id) === String(sel));
+    h += `<h3>Privacy requests</h3><div class="form">
+      <span class="muted" style="font-size:12px">When a driver asks for a copy of their data, export it. When they leave and ask for deletion, erase it: their name, contact details and location history are removed; trips and deliveries stay as anonymous business records.</span>
+      <select data-f="priv.driver" aria-label="Driver"><option value="">Choose driver…</option>${S.drivers.map((d) => `<option value="${d.id}" ${String(sel) === String(d.id) ? "selected" : ""}>${esc(d.name)} (@${esc(d.username)})</option>`).join("")}</select>
+      ${chosen ? `<div class="row"><button class="btn sm" data-act="privexport" data-id="${chosen.id}">Export data (JSON)</button></div>
+        <div class="row"><input class="inp" data-f="priv.confirm" value="${fv("priv.confirm")}" placeholder="Type ${esc(chosen.username)} to confirm" aria-label="Type the username to confirm erasure">
+        <button class="btn sm danger" data-act="priverase" data-id="${chosen.id}">Erase personal data</button></div>` : ""}</div>`;
+
+    h += `<h3>Audit log</h3>${S.audit ? `<div class="tbl-wrap"><table class="audit"><tbody>${S.audit.map((e) => `<tr><td>${new Date(e.at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })}</td>
+        <td><span class="act">${esc(e.action)}</span><br><span class="muted">${esc(e.actor_username || "system")}${e.target_type ? ` → ${esc(e.target_type)} ${esc(e.target_id ?? "")}` : ""}${e.details ? ` · ${esc(JSON.stringify(e.details)).slice(0, 120)}` : ""}</span></td></tr>`).join("")}</tbody></table></div>
+      ${S.audit.length >= 50 ? `<button class="btn sm" data-act="auditmore">Older entries</button>` : ""}`
+      : `<button class="btn sm" data-act="auditload">Show audit log</button><p class="muted" style="font-size:12px">Sign-ins, password and two-step changes, approvals, data exports and erasures, route and vehicle changes.</p>`}`;
   }
 
   h += `<h3>Vehicles</h3>`;
@@ -575,6 +625,7 @@ panel.addEventListener("change", (e) => {
   if (t.id === "anDate") { S.anDate = t.value || localDate(); S.analytics = null; loadAnalytics(); t.blur(); return; }
   if (t.id === "teamDate") { S.teamDate = t.value || localDate(); S.team = null; loadTeam(); t.blur(); return; }
   if (t.dataset.f) S.forms[t.dataset.f] = t.value;
+  if (t.dataset.f === "priv.driver") { delete S.forms["priv.confirm"]; t.blur(); lastPanel = ""; render(true); return; }
   if (t.dataset.b === "depot") S.builder.depot = t.value;
   if (t.dataset.b === "vehicle") {
     S.builder.vehicle = t.value;
@@ -658,6 +709,35 @@ panel.addEventListener("click", async (e) => {
       if (socket) socket.auth.token = r.token;
       ["pw.current", "pw.new", "pw.confirm"].forEach((k) => delete S.forms[k]);
       toast("Password changed. Your other devices have been signed out.");
+    } else if (act === "mfaon") { await showMfaSetup(); return; }
+    else if (act === "staffadd") {
+      const u = await client.post("/api/users", { name: S.forms["stf.name"], username: S.forms["stf.username"], password: S.forms["stf.password"], role: S.forms["stf.role"] || "dispatcher" });
+      ["stf.name", "stf.username", "stf.password", "stf.role"].forEach((k) => delete S.forms[k]);
+      S.users = await client.get("/api/users");
+      toast(`${u.name} added as ${u.role}. They'll set up two-step sign-in when they first sign in.`);
+    } else if (act === "staffact") {
+      const uid = Number(b.dataset.id);
+      if (!arm("staffact" + uid)) return;
+      await client.patch(`/api/users/${uid}`, { active: b.dataset.on === "1" });
+      S.users = await client.get("/api/users");
+      toast(b.dataset.on === "1" ? "Account reactivated." : "Account deactivated and signed out everywhere.");
+    }
+    else if (act === "mfareset") {
+      const uid = Number(b.dataset.id);
+      if (!arm("mfareset" + uid)) return;
+      await client.post(`/api/users/${uid}/mfa-reset`);
+      toast("Two-step sign-in reset. They'll set it up again at their next sign-in.");
+    } else if (act === "auditload") { S.audit = await client.get("/api/audit?limit=50"); }
+    else if (act === "auditmore") { S.audit = S.audit.concat(await client.get(`/api/audit?limit=50&before=${S.audit[S.audit.length - 1].id}`)); }
+    else if (act === "privexport") {
+      const d = S.drivers.find((x) => x.id === Number(b.dataset.id));
+      await client.download(`/api/drivers/${b.dataset.id}/export`, `fleetline-driver-${d?.username || b.dataset.id}.json`);
+      toast("Export downloaded. Send it to the driver securely.");
+    } else if (act === "priverase") {
+      const r = await client.post(`/api/drivers/${b.dataset.id}/erase`, { confirm_username: S.forms["priv.confirm"] || "" });
+      ["priv.driver", "priv.confirm"].forEach((k) => delete S.forms[k]);
+      S.drivers = await client.get("/api/drivers"); S.users = await client.get("/api/users");
+      toast(`Personal data erased (${r.positions_deleted} location points deleted).`);
     } else if (act === "pwreset") { S.resetFor = Number(b.dataset.id); delete S.forms["reset.pw"]; }
     else if (act === "pwresetcancel") { S.resetFor = null; delete S.forms["reset.pw"]; }
     else if (act === "pwresetsave") {

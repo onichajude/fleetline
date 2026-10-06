@@ -238,21 +238,25 @@ export function ingestPositions(driver, shift, points) {
   if (!clean.length) return 0;
 
   let l = live.get(v.id);
-  const insert = "INSERT INTO positions (vehicle_id, shift_id, driver_id, lat, lng, speed_kmh, heading, accuracy_m, recorded_at, received_at) VALUES (?,?,?,?,?,?,?,?,?,?)";
+  // OR IGNORE + the unique (vehicle_id, recorded_at) index makes re-sent batches harmless.
+  const insert = "INSERT OR IGNORE INTO positions (vehicle_id, shift_id, driver_id, lat, lng, speed_kmh, heading, accuracy_m, recorded_at, received_at) VALUES (?,?,?,?,?,?,?,?,?,?)";
   let accepted = 0, odoMeters = 0;
   tx(() => {
     for (const p of clean) {
       if (p.accuracy != null && p.accuracy > 500) continue;
       // Fill speed/heading from the previous fix when the device doesn't report them.
+      let moved = 0;
       if (l && p.t > l.t) {
         const d = haversine(l, p), dt = (p.t - l.t) / 1000;
         if (p.speed == null && dt > 0) p.speed = (d / dt) * 3.6;
         if ((p.heading == null || Number.isNaN(p.heading)) && d > 8) p.heading = bearing(l, p);
         // Odometer: count plausible movement only (good accuracy, under ~250 km/h).
-        if ((p.accuracy ?? 0) <= CFG.maxAccuracyM && dt > 0 && d / dt < 70) odoMeters += d;
+        if ((p.accuracy ?? 0) <= CFG.maxAccuracyM && dt > 0 && d / dt < 70) moved = d;
       }
-      run(insert, v.id, shift.id, driver.id, p.lat, p.lng, p.speed, p.heading, p.accuracy, p.t, now);
+      const saved = run(insert, v.id, shift.id, driver.id, p.lat, p.lng, p.speed, p.heading, p.accuracy, p.t, now).changes > 0;
+      if (!saved) continue; // duplicate of a fix we already have
       accepted++;
+      odoMeters += moved;
       if (!l || p.t >= l.t) {
         l = { ...(l || { overSpeed: 0, lastSpeedAlert: 0 }), lat: p.lat, lng: p.lng, speed: p.speed ?? 0, heading: p.heading ?? l?.heading ?? 0, accuracy: p.accuracy, t: p.t, offlineAlerted: false };
         live.set(v.id, l);

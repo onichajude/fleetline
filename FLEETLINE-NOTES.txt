@@ -24,7 +24,18 @@ Driver app (phone or browser)        Username     Password      Usual vehicle
   Kasia Nowak                        kasia        driver123     VAN-204
 
 Admin can do everything a dispatcher can, plus: approve new driver sign-ups (Team tab),
-add drivers and vehicles, and reset passwords (Setup tab).
+add drivers, staff and vehicles, reset passwords, export or erase a driver's data, and
+see the audit log (Setup tab).
+
+TWO-STEP SIGN-IN: admin and dispatcher accounts must use an authenticator app.
+The first time you sign in to the console it shows a setup key. Add it to an app on
+your phone (Google Authenticator, Microsoft Authenticator, 1Password...) and type the
+6-digit code. After that, every console sign-in asks for the current code.
+For a quick local demo only, you can switch it off: create backend/.env containing
+REQUIRE_STAFF_MFA=false and restart. Never do this on a real server.
+
+PRIVACY NOTICE: the first time a driver signs in, the driver app shows how their location
+is used. They must tap "I understand. Continue" before they can start a shift.
 
 The simulator drives dana, priya, sam and mei, so these vehicles move on the map:
 TRK-101, TRK-103, VAN-201 and VAN-202. Use tom (TRK-104) to test with your own phone,
@@ -66,11 +77,14 @@ Commands (in a terminal inside the backend folder):
   npm run simulate -- --speed 2      simulated drivers (2 = twice real speed)
   npm run seed -- --reset            WIPE all data and reload the demo data
   npm test                           run the automated tests
+  npm run backup                     back up the database now and check the backup works
 
 
 4. WHERE THINGS LIVE
 --------------------
 
+docs/architecture/       architecture pack: the completed compliance template (start with README.md)
+SECURITY.md              how to report a security problem
 backend/                 server, dispatch console, driver web app
 backend/data/            the database (NOT in GitHub - back this up yourself)
 backend/.env.example     all settings; copy to backend/.env to change them

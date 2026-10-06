@@ -121,3 +121,4 @@ main[data-view="stats"] > :is(#gps,#warn,#check,#body,#minimap,#list,#foot){disp
 .kv span{color:var(--muted)}
 .kv b{font-family:var(--f-mono);font-weight:500}
 .reasons{margin:10px 0 0;padding-left:20px;font-size:14px}
+.notice{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px;font-size:15px;line-height:1.45}
