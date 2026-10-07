@@ -49,7 +49,10 @@ Dispatch console:   http://localhost:4000
 Driver web app:     http://localhost:4000/driver/
 Phone link:         a new https://xxxx.trycloudflare.com address each time you start
                     the launcher with "Y" for the phone link. Add /driver/ on the phone.
-GitHub repository:  https://github.com/onichajude/fleetline  (private)
+GitHub repositories:
+  Company copy:     https://github.com/Axiom-Black/fleetline  (private, Axiom-Black organization)
+  Personal copy:    https://github.com/onichajude/fleetline   (private)
+  Both get the same code: changes are pushed to both.
 
 The localhost addresses only work on the computer running Fleetline. They stop working
 when you close the "Fleetline server" window or the computer sleeps.

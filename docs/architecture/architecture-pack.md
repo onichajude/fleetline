@@ -6,6 +6,7 @@ Completed copy of *Full-stack software architecture: reusable template and deliv
 |---|---|
 | Pack version | 1.0, 6 October 2026, tracks git commit of the same date |
 | Product owner (accountable) | **onichajude** (GitHub account; sole owner and developer at present) |
+| Repositories | [Axiom-Black/fleetline](https://github.com/Axiom-Black/fleetline) (company copy), [onichajude/fleetline](https://github.com/onichajude/fleetline) (personal copy); kept identical |
 | Status legend | **Applicable**: met, evidence linked. **Partial**: applicable, some controls pending. **Pending**: decision or control outstanding, with owner and due date. **N/A**: not applicable, with reason. |
 | Review | After any change to markets, data, vendors, features or hosting, and at least every 6 months (next: 2027-04-06) |
 
